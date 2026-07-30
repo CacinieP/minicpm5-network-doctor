@@ -37,7 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Served model name.",
     )
     parser.add_argument("--max-steps", type=int, default=6, help="Maximum model turns (1-12).")
-    parser.add_argument("--timeout", type=float, default=60.0, help="Model API timeout in seconds.")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=180.0,
+        help="Model API timeout in seconds. Each turn can take ~50s on slower runtimes.",
+    )
     parser.add_argument(
         "--thinking",
         action="store_true",

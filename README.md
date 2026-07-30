@@ -93,6 +93,10 @@ python -m sglang.launch_server \
 This SGLang path targets an NVIDIA GPU environment. Other OpenAI-compatible runtimes can be used
 when they return MiniCPM5 calls as native `tool_calls`.
 
+> **Quantization note:** use the full-precision / `F16` (or `bf16`) weights. Heavily quantized
+> variants (e.g. `Q4_K_M`) tend to emit long chain-of-thought and never produce a structured
+> `tool_calls` response, so the agent loop cannot run.
+
 ### 2. Install Network Doctor
 
 ```bash
