@@ -221,6 +221,46 @@ evidence, and separate diagnosis from verification.
 - The system prompt prohibits disabling certificate verification.
 - Configuration changes are suggestions only; the runtime never applies them.
 
+## Known Limitations
+
+MiniCPM5-1B is a 1B-parameter model. The runtime adds several guardrails to
+compensate, but some failure modes are inherent to the model and cannot be fully
+solved in code:
+
+- **Tool calling is not always reliable.** The first turn forces
+  `tool_choice="required"`, but some backends (notably Ollama) accept the value
+  yet occasionally return a plain-text answer with no `tool_calls`. When that
+  happens the model answers from priors instead of checking. This affects
+  roughly a minority of runs with `Q4_K_M` and cannot be fixed without a stronger
+  model.
+- **Quantization degrades tool-call stability.** Heavily quantized GGUFs
+  (`Q4_K_M`) emit longer chain-of-thought and are more prone to drift or
+  truncation than `F16`. Prefer `F16` for the most reliable diagnosis loop. The
+  `--thinking` flag helps with hard cases but also consumes more of the token
+  budget on reasoning, which can itself truncate the answer.
+- **No write access.** The agent only observes. It cannot flush DNS, toggle a
+  proxy, restart a service, or apply any fix. Recommendations are reversible
+  suggestions the user must run themselves.
+- **No deep packet or route inspection.** Tools cover DNS, TCP, HTTP, TLS, and
+  proxy environment. There is no `traceroute`, `tcpdump`, certificate-chain
+  pinning check, or ability to inspect a connection that is silently dropped by a
+  stateful firewall.
+- **Single-host, symptom-driven scope.** Each diagnosis targets the host and
+  symptom the user reports. There is no batch or continuous monitoring, and broad
+  scans are intentionally unsupported.
+- **Server-side randomness.** Diagnosis quality varies between runs at the same
+  temperature. If a run stalls, the runtime returns a structured partial
+  diagnosis (see [Agent Behavior](#agent-behavior)) so the evidence is not lost;
+  retry with `--thinking` or a more specific symptom for a sharper result.
+- **Backend-specific behavior.** SGLang (Linux/NVIDIA GPU) is the reference
+  backend. Ollama works on macOS but does not propagate the
+  `chat_template_kwargs.enable_thinking` body field, so thinking mode depends on
+  the server's own template defaults.
+
+When the model behaves erratically, the most effective escalation is a stronger
+model (e.g. MiniCPM5 4B/8B) on a backend that reliably parses tool calls, not
+more loop guardrails.
+
 ## Project Structure
 
 ```text
