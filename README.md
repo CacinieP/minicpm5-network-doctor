@@ -71,6 +71,24 @@ model's XML-style calls into standard OpenAI-compatible `tool_calls`.
 
 There is no arbitrary command or port-scanning tool.
 
+## Agent Behavior
+
+Two loop controls keep the small model honest and resilient:
+
+- **Evidence-first first turn.** The first model turn is sent with
+  `tool_choice="required"`, so the model must call a diagnostic tool before it is
+  allowed to answer. This prevents the common small-model failure of answering
+  from priors ("I don't have that tool") instead of checking. If a backend rejects
+  `required`, the request is retried once with `auto`.
+- **Graceful non-convergence.** If the model calls the same tool three turns in a
+  row without finishing, or exhausts the turn budget, the runtime stops and
+  returns a structured **partial diagnosis** — the four sections are still
+  produced, but the Diagnosis section notes that the model did not converge and
+  the Evidence section lists every result collected so far. The CLI therefore
+  returns the gathered evidence with exit code 0 instead of failing hard. A hard
+  `StepLimitError` (exit code 1) is reserved for the rare case where zero evidence
+  was collected.
+
 ## Quick Start
 
 ### 1. Serve MiniCPM5 with tool-call parsing
