@@ -3,11 +3,13 @@
 </p>
 
 <p align="center">
-  一个由 MiniCPM5 工具调用驱动的小型、本地优先网络诊断 Agent。
+  让一个 10 亿参数的小模型 + 六个只读工具，在你自己的机器上诊断 DNS 劫持、端口不通、
+  证书错误等真实网络问题。
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/CacinieP/minicpm5-network-doctor/ci.yml?branch=main&style=flat-square" alt="CI">
+  <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
@@ -15,8 +17,10 @@
 
 <p align="center">
   <a href="./README.md">English</a> ·
+  <a href="#看它工作">示例</a> ·
   <a href="#架构">架构</a> ·
   <a href="#安全边界">安全</a> ·
+  <a href="#已知局限">局限</a> ·
   <a href="#开发">开发</a>
 </p>
 
@@ -28,6 +32,32 @@ MiniCPM5 Network Doctor 将本地运行的
 
 项目刻意保持聚焦：在不给模型任意 Shell 权限的前提下，诊断开发者遇到的 DNS、TCP、
 HTTP、TLS、本地端口、代理环境和包下载问题。
+
+## 看它工作
+
+一次典型的运行——开发者反馈 `npm install` 超时。Agent 解析主机名，发现地址落入了本地代理
+注入的 fake-ip 段，从而精准定位原因：
+
+```text
+$ minicpm5-network-doctor \
+    "npm install 从 registry.example.org 下载时超时，请检查最可能的网络原因"
+
+Diagnosis: registry.example.org 的 DNS 正被一个运行在 fake-ip 模式的本地代理劫持。
+主机名被解析进 198.18.0.0/15 保留段，而不是真实服务器地址，因此包请求被拦截或黑洞。
+
+Evidence:
+- resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
+  观察提示："commonly injected by Clash/Mihomo fake-ip DNS hijacking"
+- test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
+
+Recommended action: 把 registry.example.org 加入代理的直连/绕过列表（或对该域名把代理
+从 fake-ip 切换到 redir-host 模式）。回滚方式：删除该条目即可。
+
+Verification: curl -v https://registry.example.org/  # 应到达真实 CDN IP，而非 198.x
+```
+
+上面每一个数值都由只读工具产生并原样呈现——模型绝不会伪造它没有执行过的检查。需要完整
+工具轨迹时，加上 `--json`。
 
 ## 为什么做这个项目
 

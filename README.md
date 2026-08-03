@@ -3,20 +3,25 @@
 </p>
 
 <p align="center">
-  A small, local-first network diagnostic agent powered by MiniCPM5 tool calling.
+  Catch the network problems an LLM can actually diagnose — DNS hijacking, dead ports, broken TLS —
+  with a 1B model and six read-only tools, all running on your own machine.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/CacinieP/minicpm5-network-doctor/ci.yml?branch=main&style=flat-square" alt="CI">
+  <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/coverage-37%20tests-success" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
 
 <p align="center">
   <a href="./README_CN.md">中文文档</a> ·
+  <a href="#see-it-work">Demo</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#safety-boundary">Safety</a> ·
+  <a href="#known-limitations">Limitations</a> ·
   <a href="#development">Development</a>
 </p>
 
@@ -29,6 +34,33 @@ returns evidence.
 
 The project is intentionally narrow: diagnose developer-facing DNS, TCP, HTTP, TLS, local port,
 proxy environment, and package download problems without giving the model arbitrary shell access.
+
+## See it work
+
+A typical run — a developer reports that `npm install` times out. The agent resolves the host,
+spots that the address is in the fake-ip range injected by a local proxy, and pinpoints the cause:
+
+```text
+$ minicpm5-network-doctor \
+    "npm install times out fetching registry.example.org; check the likely network cause"
+
+Diagnosis: DNS for registry.example.org is being hijacked by a local proxy running in
+fake-ip mode. The hostname resolves into the 198.18.0.0/15 reserved range instead of a
+real server address, so the package request is intercepted or blackholed.
+
+Evidence:
+- resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
+  observation: "commonly injected by Clash/Mihomo fake-ip DNS hijacking"
+- test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
+
+Recommended action: add registry.example.org to your proxy's direct/bypass list (or switch
+the proxy from fake-ip to redir-host mode for this domain). Roll back by removing the entry.
+
+Verification: curl -v https://registry.example.org/  # should reach a real CDN IP, not 198.x
+```
+
+Every value above is produced by the read-only tools and surfaced verbatim — the model never
+invents a check it did not run. For the full tool trace, pass `--json`.
 
 ## Why This Project
 
