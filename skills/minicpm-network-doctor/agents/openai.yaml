@@ -1,4 +1,4 @@
 interface:
   display_name: "MiniCPM5 Network Doctor"
   short_description: "Run safe local network diagnostics with MiniCPM5"
-  default_prompt: "Use $minicpm5-network-doctor to diagnose a network error with read-only checks."
+  default_prompt: "Use $minicpm-network-doctor to diagnose a network error with read-only checks."

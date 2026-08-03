@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>MiniCPM5 Network Doctor</strong>
+  <strong>MiniCPM Network Doctor</strong>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 
 ---
 
-MiniCPM5 Network Doctor combines a locally served
+MiniCPM Network Doctor combines a locally served
 [MiniCPM5-1B](https://github.com/OpenBMB/MiniCPM) model with a small set of read-only network
 tools. The model decides which check is useful; deterministic Python code performs the check and
 returns evidence.
@@ -41,7 +41,7 @@ A typical run — a developer reports that `npm install` times out. The agent re
 spots that the address is in the fake-ip range injected by a local proxy, and pinpoints the cause:
 
 ```text
-$ minicpm5-network-doctor \
+$ minicpm-network-doctor \
     "npm install times out fetching registry.example.org; check the likely network cause"
 
 Diagnosis: DNS for registry.example.org is being hijacked by a local proxy running in
@@ -161,7 +161,7 @@ ollama pull hf.co/openbmb/MiniCPM5-1B-GGUF:F16
 Then point Network Doctor at it:
 
 ```bash
-minicpm5-network-doctor \
+minicpm-network-doctor \
   --base-url http://127.0.0.1:11434/v1 \
   --api-key ollama \
   --model hf.co/openbmb/MiniCPM5-1B-GGUF:F16 \
@@ -191,35 +191,35 @@ pip install -e .
 ### 3. Diagnose
 
 ```bash
-minicpm5-network-doctor \
+minicpm-network-doctor \
   "npm install times out while fetching registry.npmjs.org; check the likely network cause"
 ```
 
 Harder cases can enable MiniCPM5 thinking mode:
 
 ```bash
-minicpm5-network-doctor --thinking \
+minicpm-network-doctor --thinking \
   "HTTPS works in a browser but the package manager reports a certificate error"
 ```
 
 Print the complete tool trace as JSON:
 
 ```bash
-minicpm5-network-doctor --json "Check why https://example.com returns an error"
+minicpm-network-doctor --json "Check why https://example.com returns an error"
 ```
 
 ## Configuration
 
 | Environment variable | Default |
 |----------------------|---------|
-| `MINICPM5_BASE_URL` | `http://127.0.0.1:30000/v1` |
-| `MINICPM5_MODEL` | `openbmb/MiniCPM5-1B` |
-| `MINICPM5_API_KEY` | `not-needed` |
+| `MINICPM_BASE_URL` | `http://127.0.0.1:30000/v1` |
+| `MINICPM_MODEL` | `openbmb/MiniCPM5-1B` |
+| `MINICPM_API_KEY` | `not-needed` |
 
 Equivalent CLI flags are available through:
 
 ```bash
-minicpm5-network-doctor --help
+minicpm-network-doctor --help
 ```
 
 ## Agent Skill
@@ -227,7 +227,7 @@ minicpm5-network-doctor --help
 The repository includes a Codex/Claude Code-style Agent Skill:
 
 ```text
-skills/minicpm5-network-doctor/
+skills/minicpm-network-doctor/
 ├── SKILL.md
 └── agents/
     └── openai.yaml
@@ -236,7 +236,7 @@ skills/minicpm5-network-doctor/
 For Codex, copy the folder into your personal skills directory:
 
 ```bash
-cp -R skills/minicpm5-network-doctor ~/.codex/skills/
+cp -R skills/minicpm-network-doctor ~/.codex/skills/
 ```
 
 The Skill teaches an agent to collect the exact symptom, invoke the local doctor, preserve tool
@@ -296,14 +296,14 @@ more loop guardrails.
 ## Project Structure
 
 ```text
-minicpm5-network-doctor/
-├── src/minicpm5_network_doctor/
+minicpm-network-doctor/
+├── src/minicpm_network_doctor/
 │   ├── agent.py               # Tool-calling loop
 │   ├── cli.py                 # Command-line interface
 │   ├── system_prompt.md       # Small-model diagnostic policy
 │   └── tools.py               # Read-only diagnostic tools
 ├── skills/
-│   └── minicpm5-network-doctor/
+│   └── minicpm-network-doctor/
 ├── tests/
 ├── .github/workflows/ci.yml
 ├── pyproject.toml
@@ -321,7 +321,7 @@ ruff check .
 ruff format --check .
 pytest
 python /path/to/skill-creator/scripts/quick_validate.py \
-  skills/minicpm5-network-doctor
+  skills/minicpm-network-doctor
 ```
 
 Unit tests use a fake OpenAI-compatible client, so they do not download the model or require a GPU.

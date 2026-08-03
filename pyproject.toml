@@ -3,7 +3,7 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "minicpm5-network-doctor"
+name = "minicpm-network-doctor"
 version = "0.2.0"
 description = "A safe local network diagnostic agent powered by MiniCPM5 tool calling"
 readme = "README.md"
@@ -32,7 +32,7 @@ dev = [
 ]
 
 [project.scripts]
-minicpm5-network-doctor = "minicpm5_network_doctor.cli:main"
+minicpm-network-doctor = "minicpm_network_doctor.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/CacinieP/minicpm5-network-doctor"
@@ -43,7 +43,7 @@ Issues = "https://github.com/CacinieP/minicpm5-network-doctor/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-minicpm5_network_doctor = ["system_prompt.md"]
+minicpm_network_doctor = ["system_prompt.md"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

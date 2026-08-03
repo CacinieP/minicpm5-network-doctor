@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from minicpm5_network_doctor.tools import (
+from minicpm_network_doctor.tools import (
     TOOLS,
     _classify_address,
     execute_tool,
@@ -124,7 +124,7 @@ def test_resolve_dns_flags_fake_ip_addresses(monkeypatch) -> None:
     def fake_getaddrinfo(host, port, *, type):  # noqa: ARG001
         return fake_records
 
-    monkeypatch.setattr("minicpm5_network_doctor.tools.socket.getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr("minicpm_network_doctor.tools.socket.getaddrinfo", fake_getaddrinfo)
 
     result = resolve_dns("registry.npmjs.org")
 
@@ -141,7 +141,7 @@ def test_resolve_dns_confirms_public_addresses(monkeypatch) -> None:
     ]
 
     monkeypatch.setattr(
-        "minicpm5_network_doctor.tools.socket.getaddrinfo",
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
         lambda host, port, *, type: public_records,  # noqa: ARG005
     )
 

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from minicpm5_network_doctor.agent import (
+from minicpm_network_doctor.agent import (
     NetworkDoctor,
     ToolEvent,
     _build_partial_text,
@@ -59,7 +59,7 @@ def test_agent_executes_tool_then_returns_answer(monkeypatch) -> None:
         ]
     )
     monkeypatch.setattr(
-        "minicpm5_network_doctor.agent.execute_tool",
+        "minicpm_network_doctor.agent.execute_tool",
         lambda name, arguments: {"ok": True, "tool": name, "host": arguments["host"]},
     )
 
@@ -88,7 +88,7 @@ def test_duplicate_tool_call_is_not_executed_twice(monkeypatch) -> None:
         executed.append(name)
         return {"ok": True}
 
-    monkeypatch.setattr("minicpm5_network_doctor.agent.execute_tool", execute)
+    monkeypatch.setattr("minicpm_network_doctor.agent.execute_tool", execute)
     result = NetworkDoctor(fake, max_steps=3, system_prompt="test prompt").diagnose("Check DNS")
 
     assert executed == ["resolve_dns"]
@@ -108,7 +108,7 @@ def test_repeated_same_tool_returns_partial_diagnosis(monkeypatch) -> None:
         ]
     )
     monkeypatch.setattr(
-        "minicpm5_network_doctor.agent.execute_tool",
+        "minicpm_network_doctor.agent.execute_tool",
         lambda name, arguments: {"ok": True, "host": arguments.get("host")},
     )
 
@@ -134,7 +134,7 @@ def test_first_turn_forces_tool_choice_required(monkeypatch) -> None:
         ]
     )
     monkeypatch.setattr(
-        "minicpm5_network_doctor.agent.execute_tool",
+        "minicpm_network_doctor.agent.execute_tool",
         lambda name, arguments: {"ok": True},
     )
 
@@ -162,7 +162,7 @@ def test_required_falls_back_to_auto_when_unsupported(monkeypatch) -> None:
             return _response(content="Done.")
 
     monkeypatch.setattr(
-        "minicpm5_network_doctor.agent.execute_tool",
+        "minicpm_network_doctor.agent.execute_tool",
         lambda name, arguments: {"ok": True},
     )
 

@@ -40,9 +40,9 @@ jobs:
           python /dev/stdin <<'PY'
           from pathlib import Path
 
-          skill = Path("skills/minicpm5-network-doctor/SKILL.md").read_text()
+          skill = Path("skills/minicpm-network-doctor/SKILL.md").read_text()
           assert skill.startswith("---\n")
-          assert "\nname: minicpm5-network-doctor\n" in skill
+          assert "\nname: minicpm-network-doctor\n" in skill
           assert "\ndescription:" in skill
           assert "TODO" not in skill
           PY

@@ -219,7 +219,7 @@ def test_http(url: str, timeout: float = 8.0, use_environment_proxy: bool = True
     opener = urllib.request.build_opener(proxy_handler)
     request = urllib.request.Request(
         checked_url,
-        headers={"User-Agent": "minicpm5-network-doctor/0.1"},
+        headers={"User-Agent": "minicpm-network-doctor/0.1"},
         method="HEAD",
     )
     started = time.monotonic()

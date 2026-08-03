@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>MiniCPM5 Network Doctor</strong>
+  <strong>MiniCPM Network Doctor</strong>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 ---
 
-MiniCPM5 Network Doctor 将本地运行的
+MiniCPM Network Doctor 将本地运行的
 [MiniCPM5-1B](https://github.com/OpenBMB/MiniCPM) 模型与一组精简的只读网络工具结合起来。
 模型判断应该执行哪项检查；确定性的 Python 代码负责检查并返回证据。
 
@@ -39,7 +39,7 @@ HTTP、TLS、本地端口、代理环境和包下载问题。
 注入的 fake-ip 段，从而精准定位原因：
 
 ```text
-$ minicpm5-network-doctor \
+$ minicpm-network-doctor \
     "npm install 从 registry.example.org 下载时超时，请检查最可能的网络原因"
 
 Diagnosis: registry.example.org 的 DNS 正被一个运行在 fake-ip 模式的本地代理劫持。
@@ -144,7 +144,7 @@ ollama pull hf.co/openbmb/MiniCPM5-1B-GGUF:F16
 然后把 Network Doctor 指向它：
 
 ```bash
-minicpm5-network-doctor \
+minicpm-network-doctor \
   --base-url http://127.0.0.1:11434/v1 \
   --api-key ollama \
   --model hf.co/openbmb/MiniCPM5-1B-GGUF:F16 \
@@ -170,35 +170,35 @@ pip install -e .
 ### 3. 开始诊断
 
 ```bash
-minicpm5-network-doctor \
+minicpm-network-doctor \
   "npm install 从 registry.npmjs.org 下载时超时，请检查最可能的网络原因"
 ```
 
 复杂问题可以开启 MiniCPM5 思考模式：
 
 ```bash
-minicpm5-network-doctor --thinking \
+minicpm-network-doctor --thinking \
   "浏览器可以打开 HTTPS 页面，但包管理器报告证书错误"
 ```
 
 以 JSON 输出完整工具轨迹：
 
 ```bash
-minicpm5-network-doctor --json "检查 https://example.com 返回错误的原因"
+minicpm-network-doctor --json "检查 https://example.com 返回错误的原因"
 ```
 
 ## 配置
 
 | 环境变量 | 默认值 |
 |----------|--------|
-| `MINICPM5_BASE_URL` | `http://127.0.0.1:30000/v1` |
-| `MINICPM5_MODEL` | `openbmb/MiniCPM5-1B` |
-| `MINICPM5_API_KEY` | `not-needed` |
+| `MINICPM_BASE_URL` | `http://127.0.0.1:30000/v1` |
+| `MINICPM_MODEL` | `openbmb/MiniCPM5-1B` |
+| `MINICPM_API_KEY` | `not-needed` |
 
 也可以通过对应的 CLI 参数配置：
 
 ```bash
-minicpm5-network-doctor --help
+minicpm-network-doctor --help
 ```
 
 ## Agent Skill
@@ -206,7 +206,7 @@ minicpm5-network-doctor --help
 仓库包含一个兼容 Codex/Claude Code 风格的 Agent Skill：
 
 ```text
-skills/minicpm5-network-doctor/
+skills/minicpm-network-doctor/
 ├── SKILL.md
 └── agents/
     └── openai.yaml
@@ -215,7 +215,7 @@ skills/minicpm5-network-doctor/
 在 Codex 中，可以将这个目录复制到个人技能目录：
 
 ```bash
-cp -R skills/minicpm5-network-doctor ~/.codex/skills/
+cp -R skills/minicpm-network-doctor ~/.codex/skills/
 ```
 
 该 Skill 会引导 Agent 收集准确症状、调用本地 Doctor、保留工具证据，并把诊断和验证
@@ -261,14 +261,14 @@ MiniCPM5-1B 是一个 10 亿参数的小模型。运行时添加了多重防护�
 ## 项目结构
 
 ```text
-minicpm5-network-doctor/
-├── src/minicpm5_network_doctor/
+minicpm-network-doctor/
+├── src/minicpm_network_doctor/
 │   ├── agent.py               # 工具调用循环
 │   ├── cli.py                 # 命令行界面
 │   ├── system_prompt.md       # 面向小模型的诊断策略
 │   └── tools.py               # 只读诊断工具
 ├── skills/
-│   └── minicpm5-network-doctor/
+│   └── minicpm-network-doctor/
 ├── tests/
 ├── .github/workflows/ci.yml
 ├── pyproject.toml
@@ -286,7 +286,7 @@ ruff check .
 ruff format --check .
 pytest
 python /path/to/skill-creator/scripts/quick_validate.py \
-  skills/minicpm5-network-doctor
+  skills/minicpm-network-doctor
 ```
 
 单元测试使用假的 OpenAI 兼容客户端，不会下载模型，也不需要 GPU。真实的端到端诊断

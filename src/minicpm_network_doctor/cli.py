@@ -15,8 +15,8 @@ from .tools import TOOLS
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="minicpm5-network-doctor",
-        description="Run safe, read-only network diagnostics with a local MiniCPM5 server.",
+        prog="minicpm-network-doctor",
+        description="Run safe, read-only network diagnostics with a local MiniCPM server.",
     )
     parser.add_argument(
         "prompt",
@@ -25,17 +25,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("MINICPM5_BASE_URL", "http://127.0.0.1:30000/v1"),
-        help="OpenAI-compatible MiniCPM5 endpoint.",
+        default=os.environ.get("MINICPM_BASE_URL", "http://127.0.0.1:30000/v1"),
+        help="OpenAI-compatible MiniCPM endpoint.",
     )
     parser.add_argument(
         "--api-key",
-        default=os.environ.get("MINICPM5_API_KEY", "not-needed"),
+        default=os.environ.get("MINICPM_API_KEY", "not-needed"),
         help="API key if the local endpoint requires one.",
     )
     parser.add_argument(
         "--model",
-        default=os.environ.get("MINICPM5_MODEL", "openbmb/MiniCPM5-1B"),
+        default=os.environ.get("MINICPM_MODEL", "openbmb/MiniCPM5-1B"),
         help="Served model name.",
     )
     parser.add_argument("--max-steps", type=int, default=6, help="Maximum model turns (1-12).")
@@ -81,7 +81,7 @@ def _check_server_reachable(base_url: str, timeout: float = 2.5) -> None:
     before the failure surfaces.
     """
     url = base_url.rstrip("/") + "/models"
-    request = urllib.request.Request(url, headers={"User-Agent": "minicpm5-network-doctor/0.1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "minicpm-network-doctor/0.1"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             if response.status >= 400:

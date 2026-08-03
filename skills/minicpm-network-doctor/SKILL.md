@@ -1,5 +1,5 @@
 ---
-name: minicpm5-network-doctor
+name: minicpm-network-doctor
 description: Operate the MiniCPM5 Network Doctor local diagnostic agent for evidence-based, read-only investigation of DNS failures, HTTP errors, TLS certificate problems, unreachable hosts, closed ports, proxy configuration, package download failures, and network timeouts. Use when a user wants to diagnose a development network error with a locally served MiniCPM5 model or validate that the Network Doctor CLI is configured correctly.
 ---
 
@@ -14,7 +14,7 @@ Use the local MiniCPM5 agent to collect a small amount of relevant evidence, exp
 3. Run:
 
    ```bash
-   minicpm5-network-doctor "<exact symptom and target>"
+   minicpm-network-doctor "<exact symptom and target>"
    ```
 
 4. Preserve the tool evidence in the result. Do not replace observed values with assumptions.
