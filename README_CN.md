@@ -90,6 +90,35 @@ python -m sglang.launch_server \
 这条 SGLang 路线面向 NVIDIA GPU 环境。其他 OpenAI 兼容运行时也可以接入，但需要把
 MiniCPM5 调用作为原生 `tool_calls` 返回。
 
+<details>
+<summary><b>替代后端：Ollama（macOS / 无 NVIDIA GPU）</b></summary>
+
+SGLang 只发布 Linux wheel，因此在 macOS（Apple Silicon）或任何没有 NVIDIA GPU 的机器上，
+可以使用 [Ollama](https://ollama.com) 来提供同样的模型并暴露 OpenAI 兼容接口。工具调用依赖
+`minicpm5` 聊天模板；建议使用 F16 GGUF 以获得稳定的工具调用。
+
+```bash
+# 拉取 F16 GGUF（推荐，工具调用最稳定）
+ollama pull hf.co/openbmb/MiniCPM5-1B-GGUF:F16
+
+# OpenAI 兼容端点为 http://127.0.0.1:11434/v1
+```
+
+然后把 Network Doctor 指向它：
+
+```bash
+minicpm5-network-doctor \
+  --base-url http://127.0.0.1:11434/v1 \
+  --api-key ollama \
+  --model hf.co/openbmb/MiniCPM5-1B-GGUF:F16 \
+  "npm install 从 registry.npmjs.org 下载时超时"
+```
+
+> **Ollama 量化提示：** 高度量化的版本（如 `Q4_K_M`）虽然能产生工具调用，但可能不稳定。
+> 诊断循环推荐使用 `F16`。
+
+</details>
+
 ### 2. 安装 Network Doctor
 
 ```bash

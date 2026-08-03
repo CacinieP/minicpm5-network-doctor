@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import Sequence
 
 from . import __version__
@@ -71,6 +73,33 @@ def _read_prompt(parts: list[str], parser: argparse.ArgumentParser) -> str:
     raise AssertionError("unreachable")
 
 
+def _check_server_reachable(base_url: str, timeout: float = 2.5) -> None:
+    """Quickly probe the model endpoint before entering the slower diagnosis loop.
+
+    Hits ``GET {base_url}/models`` with a short timeout. A model server that is down
+    would otherwise force the user to wait for the full ``--timeout`` (default 180s)
+    before the failure surfaces.
+    """
+    url = base_url.rstrip("/") + "/models"
+    request = urllib.request.Request(url, headers={"User-Agent": "minicpm5-network-doctor/0.1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            if response.status >= 400:
+                raise NetworkDoctorError(
+                    f"model server at {base_url} replied HTTP {response.status}; "
+                    "is the MiniCPM5 endpoint healthy?"
+                )
+    except urllib.error.HTTPError as exc:
+        raise NetworkDoctorError(
+            f"model server at {base_url} replied HTTP {exc.code}; is the MiniCPM5 endpoint healthy?"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise NetworkDoctorError(
+            f"could not reach model server at {base_url} ({exc.reason}); "
+            "start MiniCPM5 (or your OpenAI-compatible backend) before diagnosing."
+        ) from exc
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -85,6 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from openai import OpenAI
 
         client = OpenAI(base_url=args.base_url, api_key=args.api_key, timeout=args.timeout)
+        _check_server_reachable(args.base_url)
         doctor = NetworkDoctor(
             client,
             model=args.model,

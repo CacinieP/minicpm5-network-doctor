@@ -105,7 +105,10 @@ class NetworkDoctor:
                     messages=messages,
                     tools=openai_tools(),
                     tool_choice="auto",
-                    temperature=0.9 if self.thinking else 0.7,
+                    # Diagnostic reasoning is not a creative task: lower sampling
+                    # temperatures keep the small model focused on the reported symptom
+                    # instead of drifting toward unrelated hosts.
+                    temperature=0.6 if self.thinking else 0.4,
                     top_p=0.95,
                     max_tokens=1024,
                     extra_body={

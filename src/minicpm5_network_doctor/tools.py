@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import platform
@@ -61,6 +62,51 @@ def _validate_timeout(timeout: float) -> float:
     return max(0.5, min(float(timeout), 10.0))
 
 
+def _classify_address(address: str) -> str:
+    """Classify an IP address into a short human-readable category.
+
+    Returns one of: ``public`` or a reserved-block label such as
+    ``fake-ip (198.18.0.0/15)``, ``loopback``, ``private``, ``link-local``,
+    ``documentation``, or ``reserved``. Surfacing this label lets the small
+    model reason about DNS hijacking without memorising IANA allocations.
+    """
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return "invalid"
+
+    if ip.is_loopback:
+        return "loopback"
+    if ip.is_link_local:
+        return "link-local"
+
+    networks = {
+        "10.0.0.0/8": "private",
+        "172.16.0.0/12": "private",
+        "192.168.0.0/16": "private",
+        "fc00::/7": "private",
+        # RFC 2544 benchmarking range, reused by Clash/Mihomo as the default
+        # fake-ip pool when DNS hijacking is enabled.
+        "198.18.0.0/15": "fake-ip (198.18.0.0/15)",
+        # RFC 6598 carrier-grade NAT (100.64.0.0/10), also reused by
+        # Tailscale and some proxies as an overlay address pool.
+        "100.64.0.0/10": "cg nat (100.64.0.0/10)",
+        "2001:db8::/32": "documentation",
+        "192.0.2.0/24": "documentation",
+        "198.51.100.0/24": "documentation",
+        "203.0.113.0/24": "documentation",
+    }
+    for cidr, label in networks.items():
+        if ip in ipaddress.ip_network(cidr):
+            return label
+
+    if ip.is_multicast:
+        return "multicast"
+    if ip.is_reserved or ip.is_unspecified:
+        return "reserved"
+    return "public"
+
+
 def _validate_url(url: str) -> str:
     if not isinstance(url, str):
         raise ValueError("url must be a string")
@@ -101,11 +147,49 @@ def resolve_dns(host: str, port: int = 443) -> dict[str, Any]:
         key = (family_name, address)
         if key not in seen:
             seen.add(key)
-            addresses.append({"family": family_name, "address": address})
+            addresses.append(
+                {
+                    "family": family_name,
+                    "address": address,
+                    "classification": _classify_address(address),
+                }
+            )
+
+    observations: list[str] = []
+    non_public = sorted({a["classification"] for a in addresses if a["classification"] != "public"})
+    for label in non_public:
+        if label.startswith("fake-ip"):
+            observations.append(
+                f"The resolved address is in the {label} range, which is a reserved "
+                "benchmarking block commonly injected by Clash/Mihomo fake-ip DNS "
+                "hijacking. The real upstream IP is hidden; the proxy may be "
+                "intercepting or blackholing this traffic."
+            )
+        elif label.startswith("cg nat"):
+            observations.append(
+                f"The resolved address is in the {label} range, which is not globally "
+                "routable and is typically injected by an overlay such as Tailscale or "
+                "a proxy."
+            )
+        elif label in {"private", "loopback", "link-local"}:
+            observations.append(
+                f"The resolved address is {label}, not a public address. A public "
+                "hostname resolving locally usually means a local override, split-horizon "
+                "DNS, or a proxy mapping."
+            )
+        elif label == "documentation":
+            observations.append(
+                f"The resolved address is in a documentation/test range ({label}); this "
+                "is never a real server address and indicates DNS is returning a placeholder."
+            )
+    if addresses and all(a["classification"] == "public" for a in addresses):
+        observations.append("All resolved addresses are public routable IPs.")
+
     return {
         "ok": bool(addresses),
         "host": checked_host,
         "addresses": addresses[:8],
+        "observations": observations,
         "duration_ms": round((time.monotonic() - started) * 1000, 1),
     }
 

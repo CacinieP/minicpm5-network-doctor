@@ -93,6 +93,36 @@ python -m sglang.launch_server \
 This SGLang path targets an NVIDIA GPU environment. Other OpenAI-compatible runtimes can be used
 when they return MiniCPM5 calls as native `tool_calls`.
 
+<details>
+<summary><b>Alternative backend: Ollama (macOS / no NVIDIA GPU)</b></summary>
+
+SGLang only ships Linux wheels, so on macOS (Apple Silicon) or any machine without an NVIDIA GPU,
+use [Ollama](https://ollama.com) to serve the same model with an OpenAI-compatible endpoint.
+Tool calling works with the `minicpm5` chat template; the F16 GGUF is recommended for reliable
+tool-call generation.
+
+```bash
+# Pull the F16 GGUF (recommended for stable tool calls)
+ollama pull hf.co/openbmb/MiniCPM5-1B-GGUF:F16
+
+# The OpenAI-compatible endpoint is on http://127.0.0.1:11434/v1
+```
+
+Then point Network Doctor at it:
+
+```bash
+minicpm5-network-doctor \
+  --base-url http://127.0.0.1:11434/v1 \
+  --api-key ollama \
+  --model hf.co/openbmb/MiniCPM5-1B-GGUF:F16 \
+  "npm install times out fetching registry.npmjs.org"
+```
+
+> **Quantization note for Ollama:** heavily quantized variants (e.g. `Q4_K_M`) can still produce
+> tool calls but may drift. Prefer `F16` for the most reliable diagnosis loop.
+
+</details>
+
 > **Quantization note:** use the full-precision / `F16` (or `bf16`) weights. Heavily quantized
 > variants (e.g. `Q4_K_M`) tend to emit long chain-of-thought and never produce a structured
 > `tool_calls` response, so the agent loop cannot run.
