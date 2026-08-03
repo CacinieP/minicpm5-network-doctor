@@ -1,0 +1,55 @@
+name: Publish to PyPI
+
+# Builds the package on every tag push (v*) and publishes to PyPI using
+# Trusted Publishing (OIDC) — no long-lived API token stored as a secret.
+# One-time setup required: see docs/publishing.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          twine check dist/*
+
+      - name: Verify the wheel imports and loads its prompt
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --no-deps dist/*.whl
+          /tmp/verify/bin/minicpm-network-doctor --version
+          /tmp/verify/bin/minicpm-network-doctor --list-tools
+          /tmp/verify/bin/python -c "from minicpm_network_doctor.prompt import load_system_prompt; assert len(load_system_prompt()) > 100"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi  # requires a GitHub Environment named "pypi"
+    permissions:
+      id-token: write  # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
