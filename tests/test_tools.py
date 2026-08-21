@@ -148,3 +148,210 @@ def test_resolve_dns_confirms_public_addresses(monkeypatch) -> None:
     result = resolve_dns("example.com")
 
     assert result["observations"] == ["All resolved addresses are public routable IPs."]
+
+
+def _http_response(status=200, url="https://example.com/", server="nginx"):
+    import types
+
+    return types.SimpleNamespace(
+        status=status,
+        geturl=lambda: url,
+        headers={"Server": server, "Content-Type": "text/html"},
+    )
+
+
+def test_test_tcp_reports_peer_address(monkeypatch) -> None:
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def getpeername(self):
+            return ("93.184.216.34", 443)
+
+    captured = {}
+
+    def fake_connect(address, timeout):
+        captured["address"] = address
+        captured["timeout"] = timeout
+        return _Conn()
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.socket.create_connection", fake_connect)
+
+    from minicpm_network_doctor.tools import test_tcp
+
+    result = test_tcp("example.com", 443, timeout=3.0)
+
+    assert result["ok"] is True
+    assert result["peer_address"] == "93.184.216.34"
+    assert captured["address"] == ("example.com", 443)
+    assert captured["timeout"] == 3.0
+    assert result["duration_ms"] >= 0
+
+
+def test_test_http_reports_status_without_raising_on_http_error(monkeypatch) -> None:
+    """A 4xx/5xx is a result, not an exception: the model needs the status."""
+    import urllib.error
+    import urllib.request
+
+    calls = []
+
+    class _Opener:
+        def open(self, request, timeout):
+            calls.append((request.full_url, request.get_method(), timeout))
+            raise urllib.error.HTTPError(
+                request.full_url, 503, "Service Unavailable", {"Server": "gateway"}, None
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda handler=None: _Opener())
+
+    from minicpm_network_doctor.tools import test_http
+
+    result = test_http("https://registry.example.org/health", timeout=4.0)
+
+    assert result["ok"] is True  # the check ran; the outcome is the status
+    assert result["status"] == 503
+    assert result["server"] == "gateway"
+    assert calls[0][0] == "https://registry.example.org/health"
+    assert calls[0][1] == "HEAD"
+
+
+def test_test_http_happy_path(monkeypatch) -> None:
+    import contextlib
+    import urllib.request
+
+    class _Opener:
+        def open(self, request, timeout):
+            return contextlib.nullcontext(
+                _http_response(200, "https://example.com/index.html", "cloudfront")
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda handler=None: _Opener())
+
+    from minicpm_network_doctor.tools import test_http
+
+    result = test_http("https://example.com")
+
+    assert result["ok"] is True
+    assert result["status"] == 200
+    assert result["final_url"] == "https://example.com/index.html"
+    assert result["server"] == "cloudfront"
+
+
+def test_inspect_tls_summarizes_certificate(monkeypatch) -> None:
+    import datetime
+    import types
+
+    expiry = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=90)
+    not_after = expiry.strftime("%b %d %H:%M:%S %Y GMT")
+
+    wrapped = types.SimpleNamespace(
+        getpeercert=lambda: {
+            "subject": ((("commonName", "example.com"),),),
+            "issuer": ((("organizationName", "Let's Encrypt"),),),
+            "notAfter": not_after,
+        },
+        version=lambda: "TLSv1.3",
+        cipher=lambda: ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256),
+    )
+
+    class _Context:
+        def wrap_socket(self, raw, server_hostname=None):
+            assert server_hostname == "example.com"
+            return _CtxWrap(wrapped)
+
+    class _CtxWrap:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __enter__(self):
+            return self._inner
+
+        def __exit__(self, *exc):
+            return False
+
+    class _Raw:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.create_connection",
+        lambda address, timeout: _Raw(),
+    )
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.ssl.create_default_context",
+        lambda: _Context(),
+    )
+
+    from minicpm_network_doctor.tools import inspect_tls
+
+    result = inspect_tls("example.com", 443, timeout=4.0)
+
+    assert result["ok"] is True
+    assert result["protocol"] == "TLSv1.3"
+    assert result["cipher"] == "TLS_AES_256_GCM_SHA384"
+    assert result["subject"] == "commonName=example.com"
+    assert result["issuer"] == "organizationName=Let's Encrypt"
+    assert 80 <= result["days_remaining"] <= 91
+
+
+def test_inspect_tls_handles_certificate_without_expiry(monkeypatch) -> None:
+    import types
+
+    wrapped = types.SimpleNamespace(
+        getpeercert=lambda: {"subject": (), "issuer": ()},
+        version=lambda: "TLSv1.2",
+        cipher=lambda: ("ECDHE-RSA-AES128-GCM-SHA256", "TLSv1.2", 128),
+    )
+
+    class _CtxWrap:
+        def __enter__(self):
+            return wrapped
+
+        def __exit__(self, *exc):
+            return False
+
+    class _Raw:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.create_connection",
+        lambda address, timeout: _Raw(),
+    )
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.ssl.create_default_context",
+        lambda: type(
+            "Ctx", (), {"wrap_socket": lambda self, raw, server_hostname=None: _CtxWrap()}
+        )(),
+    )
+
+    from minicpm_network_doctor.tools import inspect_tls
+
+    result = inspect_tls("example.com")
+
+    assert result["ok"] is True
+    assert result["expires_at"] is None
+    assert result["days_remaining"] is None
+
+
+def test_execute_tool_wraps_handler_exceptions(monkeypatch) -> None:
+    from minicpm_network_doctor import tools as tools_mod
+
+    def _boom(**kwargs):
+        raise KeyError("missing")
+
+    monkeypatch.setitem(tools_mod.TOOLS, "boom", tools_mod.ToolSpec("boom", "boom", {}, _boom))
+    result = tools_mod.execute_tool("boom", {})
+
+    assert result["ok"] is False
+    assert result["error_type"] == "KeyError"

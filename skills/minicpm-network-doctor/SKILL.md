@@ -21,6 +21,15 @@ Use the local MiniCPM5 agent to collect a small amount of relevant evidence, exp
 5. Present the diagnosis, evidence, recommended action, and verification command separately.
 6. If evidence is inconclusive, request one additional targeted observation instead of proposing broad configuration changes.
 
+## Evidence trail
+
+Every run also writes a JSONL rollout log (query, per-tool results with error
+classes, and an exit record with a machine-readable `exit_status`) to the user
+state dir. When you need the full structured trace — e.g. to compare runs or
+diagnose a non-convergence — pass `--json` and read `rollout_path`, or run with
+`--rollout-dir <path>`. Non-converged runs still exit 0 with a partial
+diagnosis; only a run with zero evidence exits 1.
+
 ## Input guidance
 
 Include concrete details whenever available:

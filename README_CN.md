@@ -101,10 +101,12 @@ XML 风格调用转换为标准 OpenAI 兼容 `tool_calls`。
 
 ## Agent 行为
 
-两层循环控制让小模型保持诚实和鲁棒：
+四层循环控制让小模型保持诚实和鲁棒：
 
 - **首轮强制取证。** 第一轮模型请求以 `tool_choice="required"` 发送，模型必须先调用一个诊断工具才能作答。这能避免小模型常见的"凭印象回答"（例如声称"我没有这个工具"）而不去实际检查。如果后端拒绝 `required`，会自动退回 `auto` 重试一次。
 - **不收敛时优雅返回。** 如果模型连续三轮调用同一个工具仍未结束，或者用尽了轮次上限，运行时会停止并返回**结构化的部分诊断**——仍然输出四个段落，但 Diagnosis 段会注明模型未收敛，Evidence 段列出已收集的全部结果。因此 CLI 会以退出码 0 返回已收集的证据，而不是直接报错。硬性的 `StepLimitError`（退出码 1）仅保留给"未收集到任何证据"的罕见情况。
+- **后端故障容忍。** 本地推理服务中途抖动不再丢弃已收集的证据：请求会重试一次，若后端仍不可用，则走同一条部分诊断出口，reason 注明 "backend became unavailable"。在尚未收集到任何证据时，错误照常抛出（退出码 1）。
+- **分类错误熔断。** 并非所有失败的检查都是故障：域名解析不出、连接被拒恰恰是诊断需要的证据，这类结果**永不**计入模型的错误计数。连续三次*畸形*调用（未知工具、非法参数、重复调用）才会作为模型错误终止运行，而不是无限循环。
 
 ## 快速开始
 
@@ -194,12 +196,19 @@ minicpm-network-doctor --json "检查 https://example.com 返回错误的原因"
 | `MINICPM_BASE_URL` | `http://127.0.0.1:30000/v1` |
 | `MINICPM_MODEL` | `openbmb/MiniCPM5-1B` |
 | `MINICPM_API_KEY` | `not-needed` |
+| `MINICPM_NETWORK_DOCTOR_ROLLOUT_DIR` | 平台状态目录（见下文） |
 
 也可以通过对应的 CLI 参数配置：
 
 ```bash
 minicpm-network-doctor --help
 ```
+
+## 诊断日志（Rollout）
+
+每次诊断都会向磁盘追加写出一个 JSONL rollout：用户提问、每条工具结果（带分类后的 `error_class`）、以及一条带机器可读 `exit_status`（`completed`、`step_limit`、`tool_name_streak`、`model_error_limit`、`backend_error`、`empty_response`、`no_evidence`、`crash`）的 `exit` 记录。记录逐行 flush，即使进程硬崩溃，已发生的事件也已落盘。
+
+默认位置：macOS 为 `~/Library/Application Support/minicpm-network-doctor/rollouts/`，其他平台为 `~/.local/state/minicpm-network-doctor/rollouts/`；可用 `MINICPM_NETWORK_DOCTOR_ROLLOUT_DIR` 或 `--rollout-dir` 覆盖，单次运行可用 `--no-rollout` 关闭。rollout 文件路径会包含在 `--json` 输出中。写入是尽力而为：位置不可写时静默关闭日志，绝不影响诊断本身。
 
 ## Agent Skill
 
@@ -265,6 +274,7 @@ minicpm-network-doctor/
 ├── src/minicpm_network_doctor/
 │   ├── agent.py               # 工具调用循环
 │   ├── cli.py                 # 命令行界面
+│   ├── rollout.py             # 尽力而为的 JSONL 诊断日志
 │   ├── system_prompt.md       # 面向小模型的诊断策略
 │   └── tools.py               # 只读诊断工具
 ├── skills/

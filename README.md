@@ -105,7 +105,7 @@ There is no arbitrary command or port-scanning tool.
 
 ## Agent Behavior
 
-Two loop controls keep the small model honest and resilient:
+Four loop controls keep the small model honest and resilient:
 
 - **Evidence-first first turn.** The first model turn is sent with
   `tool_choice="required"`, so the model must call a diagnostic tool before it is
@@ -120,6 +120,16 @@ Two loop controls keep the small model honest and resilient:
   returns the gathered evidence with exit code 0 instead of failing hard. A hard
   `StepLimitError` (exit code 1) is reserved for the rare case where zero evidence
   was collected.
+- **Backend-failure tolerance.** A local inference server that hiccups
+  mid-diagnosis no longer discards the collected evidence: the request is
+  retried once, and if the backend is still unavailable the run exits through
+  the same partial-diagnosis path with a "backend became unavailable" reason.
+  Before any evidence exists, the error propagates normally (exit code 1).
+- **Classified error breaker.** Not every failed check is a failure: an
+  unresolvable name or a refused connection is exactly the evidence a
+  diagnosis needs, so those never count against the model. Three consecutive
+  *malformed* usages — unknown tool, invalid arguments, or duplicate calls —
+  stop the run as a model error instead of looping.
 
 ## Quick Start
 
@@ -215,12 +225,29 @@ minicpm-network-doctor --json "Check why https://example.com returns an error"
 | `MINICPM_BASE_URL` | `http://127.0.0.1:30000/v1` |
 | `MINICPM_MODEL` | `openbmb/MiniCPM5-1B` |
 | `MINICPM_API_KEY` | `not-needed` |
+| `MINICPM_NETWORK_DOCTOR_ROLLOUT_DIR` | platform state dir (see below) |
 
 Equivalent CLI flags are available through:
 
 ```bash
 minicpm-network-doctor --help
 ```
+
+## Rollout Logs
+
+Every diagnosis writes an append-only JSONL rollout to disk: the query, one
+record per tool result (with a classified `error_class`), and a final `exit`
+record carrying a machine-readable `exit_status` (`completed`, `step_limit`,
+`tool_name_streak`, `model_error_limit`, `backend_error`, `empty_response`,
+`no_evidence`, `crash`). Records are flushed line by line, so a hard crash still
+leaves the events that already happened on disk.
+
+Default locations: `~/Library/Application Support/minicpm-network-doctor/rollouts/`
+on macOS, `~/.local/state/minicpm-network-doctor/rollouts/` elsewhere; override
+with `MINICPM_NETWORK_DOCTOR_ROLLOUT_DIR` or `--rollout-dir`. Disable per run
+with `--no-rollout`. The rollout path is included in `--json` output. Writing is
+best-effort: an unwritable location disables logging silently and never breaks
+the diagnosis itself.
 
 ## Agent Skill
 
@@ -300,6 +327,7 @@ minicpm-network-doctor/
 ├── src/minicpm_network_doctor/
 │   ├── agent.py               # Tool-calling loop
 │   ├── cli.py                 # Command-line interface
+│   ├── rollout.py             # Best-effort JSONL rollout logs
 │   ├── system_prompt.md       # Small-model diagnostic policy
 │   └── tools.py               # Read-only diagnostic tools
 ├── skills/
