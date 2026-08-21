@@ -29,11 +29,7 @@ def default_rollout_dir() -> Path:
         return Path(override)
     if sys.platform == "darwin":
         return (
-            Path.home()
-            / "Library"
-            / "Application Support"
-            / "minicpm-network-doctor"
-            / "rollouts"
+            Path.home() / "Library" / "Application Support" / "minicpm-network-doctor" / "rollouts"
         )
     return Path.home() / ".local" / "state" / "minicpm-network-doctor" / "rollouts"
 

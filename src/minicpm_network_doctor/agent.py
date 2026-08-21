@@ -245,9 +245,7 @@ class NetworkDoctor:
             raise ValueError("query must not be empty")
         query = query.strip()
 
-        rollout_writer = (
-            RolloutWriter(self.rollout_dir) if self.rollout else NullRolloutWriter()
-        )
+        rollout_writer = RolloutWriter(self.rollout_dir) if self.rollout else NullRolloutWriter()
         rollout_writer.append(
             {"event": "query", "query": query, "model": self.model, "max_steps": self.max_steps}
         )
@@ -287,9 +285,7 @@ class NetworkDoctor:
                         backend_errors += 1
                         if not events:
                             exit_status = "backend_error"
-                            raise NetworkDoctorError(
-                                f"MiniCPM5 request failed: {exc}"
-                            ) from exc
+                            raise NetworkDoctorError(f"MiniCPM5 request failed: {exc}") from exc
                         if backend_errors >= 2:
                             non_convergence_reason = (
                                 "the model backend became unavailable mid-diagnosis "
@@ -309,9 +305,7 @@ class NetworkDoctor:
                     content = (getattr(message, "content", None) or "").strip()
                     if not content:
                         exit_status = "empty_response"
-                        raise NetworkDoctorError(
-                            "MiniCPM5 returned neither text nor tool calls"
-                        )
+                        raise NetworkDoctorError("MiniCPM5 returned neither text nor tool calls")
                     exit_status = "completed"
                     return DiagnosisResult(
                         text=content,
@@ -325,9 +319,7 @@ class NetworkDoctor:
                     {
                         "event": "assistant",
                         "turn": completed_turns,
-                        "tool_calls": [
-                            {"name": call.function.name} for call in calls
-                        ],
+                        "tool_calls": [{"name": call.function.name} for call in calls],
                     }
                 )
                 turn_names: list[str] = []
@@ -358,9 +350,7 @@ class NetworkDoctor:
                         }
 
                     events.append(ToolEvent(name=name, arguments=arguments, result=result))
-                    failure_class = (
-                        _classify_tool_failure(result) if not result.get("ok") else ""
-                    )
+                    failure_class = _classify_tool_failure(result) if not result.get("ok") else ""
                     rollout_writer.append(
                         {
                             "event": "tool_result",
