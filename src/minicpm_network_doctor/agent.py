@@ -122,8 +122,10 @@ def _classify_tool_failure(result: dict[str, Any]) -> str:
     Returns one of ``"model_error"`` (malformed usage — unknown tool, invalid
     arguments, duplicate call), ``"tool_finding"`` (the check ran and reported
     a network failure — diagnostic evidence), or ``"internal"`` (anything
-    unexpected, e.g. a bug inside a handler). Only ``model_error`` and
-    ``internal`` count toward the consecutive breaker: a productive diagnosis
+    unexpected, e.g. a bug inside a handler). Only ``model_error`` counts
+    toward the consecutive breaker; ``internal`` failures are fed back to the
+    model like any error, and a repetitive one is caught by the same-tool
+    streak breaker: a productive diagnosis
     of a down host produces a stream of ``tool_finding`` failures that must
     not stop the run.
     """
