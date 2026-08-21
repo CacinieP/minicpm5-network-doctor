@@ -7,6 +7,7 @@ import sys
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
+from pathlib import Path
 
 from . import __version__
 from .agent import NetworkDoctor, NetworkDoctorError
@@ -54,6 +55,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print the answer and tool trace as JSON.",
+    )
+    parser.add_argument(
+        "--no-rollout",
+        action="store_true",
+        help="Skip writing the on-disk rollout log for this diagnosis.",
+    )
+    parser.add_argument(
+        "--rollout-dir",
+        type=Path,
+        default=None,
+        help="Directory for rollout logs (default: user state dir, "
+        "or $MINICPM_NETWORK_DOCTOR_ROLLOUT_DIR).",
     )
     parser.add_argument(
         "--list-tools",
@@ -120,6 +133,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=args.model,
             max_steps=args.max_steps,
             thinking=args.thinking,
+            rollout=not args.no_rollout,
+            rollout_dir=args.rollout_dir,
         )
         result = doctor.diagnose(prompt)
     except (NetworkDoctorError, ValueError) as exc:
