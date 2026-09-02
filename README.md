@@ -150,6 +150,11 @@ Four runtime controls keep the small model honest and resilient:
 
 ## Quick Start
 
+> **Distribution status:** v0.3.0 is released through GitHub Releases. This package is not
+> currently published on PyPI; install it from the repository as shown below.
+
+This is an independent community project and is not affiliated with or endorsed by OpenBMB.
+
 ### 1. Serve MiniCPM5 with tool-call parsing
 
 The official MiniCPM deployment skill currently recommends installing SGLang from `main` for the

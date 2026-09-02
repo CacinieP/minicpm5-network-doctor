@@ -1,88 +1,43 @@
-# Publishing to PyPI
+# PyPI publication plan (deferred)
 
-This project publishes to PyPI via **Trusted Publishing (OIDC)** — no API tokens
-stored as GitHub secrets. Publication is triggered automatically by pushing a
-`v*` tag.
+Status as of 2026-09-02: **deferred**.
 
-## One-time setup (do this before the first release)
+Version 0.3.0 is distributed through GitHub Releases only. The repository has no
+active PyPI publishing workflow, no GitHub `pypi` environment, and no configured
+PyPI Trusted Publisher. Pushing a version tag must not publish anything to PyPI.
 
-Trusted Publishing links a PyPI project to a GitHub workflow. You only configure
-this once:
+## Why publication is deferred
 
-1. **Reserve the project on PyPI** (only needed if the name is not yet registered).
-   For the very first release you can use a short-lived API token, or — preferred —
-   let the first trusted-publishing run create it (PyPI creates the project on the
-   first successful OIDC publish if the publisher is pre-registered).
+- The project is still marked Alpha and GitHub Releases cover the current trial
+  and source-install use cases.
+- The package name and independent-community-project wording should remain stable
+  before creating a permanent package identity on PyPI.
+- A PyPI release cannot be overwritten with new files under the same version.
+- There is not yet enough user demand for a registry install path to justify a
+  second public distribution channel.
 
-2. **Configure the Trusted Publisher on PyPI:**
-   - Go to <https://pypi.org/manage/account/publishing/>
-   - Add a new publisher of type **GitHub**
-   - Fill in:
-     - PyPI project name: `minicpm-network-doctor`
-     - Owner: `CacinieP`
-     - Repository: `minicpm5-network-doctor`
-     - Workflow filename: `publish.yml`
-     - Environment name: `pypi`
+## Activation criteria
 
-3. **Create a GitHub Environment named `pypi`:**
-   - Go to the repo **Settings → Environments → New environment**
-   - Name it `pypi`
-   - (Optional but recommended) add required reviewers so a tag push alone can't
-     publish without approval.
+Reconsider PyPI publication when all of the following are true:
 
-After this, `git push` a `v*` tag and the workflow publishes on PyPI automatically.
+1. Users need `pipx install minicpm-network-doctor` or an equivalent registry install.
+2. The CLI and package name are stable enough for a Beta release.
+3. CI and isolated wheel-install checks pass across supported Python versions.
+4. The maintenance and security-response expectations of a public package are accepted.
+5. The exact first version, package name, publisher identity, and public consequences
+   receive an explicit release-time approval.
 
-## Standard release procedure
+## Future implementation
 
-```bash
-# 1. Make sure main is green and up to date
-git checkout main
-git pull
-pytest && ruff check . && ruff format --check .
+If the criteria are met, prepare PyPI as a separate, reviewed change:
 
-# 2. Bump the version in two places
-#    pyproject.toml        -> version = "0.x.0"
-#    src/minicpm_network_doctor/__init__.py -> __version__ = "0.x.0"
+1. Add a dedicated tag-triggered workflow using PyPI Trusted Publishing (OIDC).
+2. Create a protected GitHub Environment named `pypi` with required reviewers.
+3. Register the exact repository, workflow filename, and environment as a pending
+   Trusted Publisher on PyPI.
+4. Build and validate the wheel and source distribution in an isolated environment.
+5. Obtain a separate confirmation before pushing the first publishing tag.
+6. Verify the public PyPI project, exact version, hashes, and clean installation.
 
-# 3. Commit the bump
-git add pyproject.toml src/minicpm_network_doctor/__init__.py
-git commit -m "chore: bump version to 0.x.0"
-git push
-
-# 4. Tag and push — this triggers publish.yml
-git tag -a v0.x.0 -m "v0.x.0: <short description>"
-git push origin v0.x.0
-```
-
-Watch the workflow:
-<https://github.com/CacinieP/minicpm5-network-doctor/actions/workflows/publish.yml>
-
-The `build` job builds the wheel + sdist, runs `twine check`, and verifies the
-wheel actually imports and loads its prompt from a fresh venv. Only if that
-passes does the `publish` job upload to PyPI.
-
-## Verify after publishing
-
-```bash
-pip install minicpm-network-doctor==0.x.0
-minicpm-network-doctor --version
-```
-
-The package on PyPI:
-<https://pypi.org/project/minicpm-network-doctor/>
-
-## Rollback
-
-PyPI does not allow re-uploading the same version or deleting files (except within
-the first hour). If a broken release ships:
-
-1. Yank it: `pip download` still works but it is excluded from `*` resolvers:
-   `https://pypi.org/manage/project/minicpm-network-doctor/releases/`
-2. Bump to `0.x.1` and publish a fixed release.
-3. Leave the yanked version in place — never delete release history.
-
-## Why no API token?
-
-Trusted Publishing (PEP 541 / OIDC) issues a short-lived token per workflow run,
-scoped to this exact repository + workflow + environment. There is no long-lived
-secret to leak or rotate. This is the PyPI-recommended mechanism since 2024.
+Until that plan is explicitly activated, GitHub Releases remain the only public
+release channel.

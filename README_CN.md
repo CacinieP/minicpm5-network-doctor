@@ -131,6 +131,10 @@ XML 风格调用转换为标准 OpenAI 兼容 `tool_calls`。
 
 ## 快速开始
 
+> **分发状态：** v0.3.0 通过 GitHub Releases 发布。本项目目前未发布到 PyPI；请按下文从仓库安装。
+
+这是一个独立的社区项目，与 OpenBMB 不存在隶属关系，也未获得其官方背书。
+
 ### 1. 启动支持工具调用解析的 MiniCPM5
 
 MiniCPM 官方部署 Skill 当前建议从 `main` 安装 SGLang，以获得 MiniCPM5 解析器：

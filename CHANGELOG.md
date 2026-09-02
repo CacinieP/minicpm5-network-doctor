@@ -37,9 +37,14 @@ All notable changes are documented here. The project follows semantic versioning
 - Model-server URLs reject embedded credentials and non-HTTP schemes.
 - HTTP checks block cross-host redirects, and model preflight blocks cross-origin redirects so
   authorization headers cannot be forwarded outside the configured endpoint.
-- Tag publication fails closed when the Git tag, project metadata, and package version differ.
+- Release preparation verifies that the Git tag, project metadata, and package version agree.
 - Release artifact upload/download actions are updated to their current supported major versions.
 - Hosts-file inspection never returns unrelated mappings and rejects unexpectedly large files.
+
+### Removed
+
+- Removed automatic PyPI publication from version-tag pushes. PyPI distribution is deferred;
+  GitHub Releases are the only public release channel for v0.3.0.
 
 ## 0.2.0
 
