@@ -252,7 +252,7 @@ def test_classify_address_rejects_garbage() -> None:
 
 
 def test_resolve_dns_flags_fake_ip_addresses(monkeypatch) -> None:
-    """When DNS returns reserved-range addresses, observations must warn the model."""
+    """When DNS returns a fake-IP address, report the mapping without assigning blame."""
     fake_records = [
         (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("198.18.0.190", 443)),
     ]
@@ -268,6 +268,26 @@ def test_resolve_dns_flags_fake_ip_addresses(monkeypatch) -> None:
     assert result["addresses"][0]["classification"].startswith("fake-ip")
     assert any("fake-ip" in obs for obs in result["observations"])
     assert any("Clash" in obs or "Mihomo" in obs for obs in result["observations"])
+
+
+def test_fake_ip_observation_does_not_claim_a_connectivity_failure(monkeypatch) -> None:
+    fake_records = [
+        (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("198.18.0.190", 443)),
+    ]
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda host, port, *, type: fake_records,  # noqa: ARG005
+    )
+
+    result = resolve_dns("registry.npmjs.org")
+    observation = " ".join(result["observations"])
+    lowered = observation.lower()
+
+    assert "proxy-managed DNS path" in observation
+    assert "does not establish a connectivity failure" in observation
+    assert "hijack" not in lowered
+    assert "blackhol" not in lowered
+    assert "may be intercepting" not in lowered
 
 
 def test_resolve_dns_confirms_public_addresses(monkeypatch) -> None:

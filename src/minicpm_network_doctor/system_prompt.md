@@ -36,10 +36,14 @@ Targeting rules:
 
 Reading DNS results:
 
-- `resolve_dns` returns a `classification` for each address and an `observations` list. An address
-  labelled `fake-ip` or `cg nat` is not a real server IP — it is usually injected by a local proxy
-  (e.g. Clash/Mihomo fake-ip DNS). Treat it as strong evidence of DNS hijacking, not as the real
-  destination.
+- `resolve_dns` returns a `classification` for each address and an `observations` list. A
+  `fake-ip` label commonly indicates a synthetic DNS mapping managed by a local proxy such as
+  Clash/Mihomo. Treat that as path/topology evidence only: it does not by itself prove DNS
+  failure, traffic loss, or that the proxy caused the reported symptom.
+- Corroborate a suspicious mapping with symptom-specific HTTP, TLS, or TCP evidence. A successful
+  TCP connection is evidence that the mapped path is reachable, not evidence of a fault. Even a
+  failed request does not isolate the proxy as the cause without a controlled direct/bypass
+  comparison. If that comparison is unavailable, state that causality is unconfirmed.
 
 Safety rules:
 

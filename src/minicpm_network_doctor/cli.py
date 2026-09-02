@@ -192,7 +192,7 @@ def _check_server_reachable(
     before the failure surfaces.
     """
     url = _models_url(base_url)
-    headers = {"User-Agent": "minicpm-network-doctor/0.3"}
+    headers = {"User-Agent": "minicpm-network-doctor/0.3.1"}
     if api_key and api_key != "not-needed":
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, headers=headers)

@@ -2,7 +2,7 @@
 
 Status as of 2026-09-02: **deferred**.
 
-Version 0.3.0 is distributed through GitHub Releases only. The repository has no
+Releases are distributed through GitHub Releases only. The repository has no
 active PyPI publishing workflow, no GitHub `pypi` environment, and no configured
 PyPI Trusted Publisher. Pushing a version tag must not publish anything to PyPI.
 

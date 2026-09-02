@@ -2,6 +2,23 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## 0.3.1 — 2026-09-02
+
+### Changed
+
+- Treat fake-IP classification as evidence of a proxy-managed DNS path, not proof of DNS failure,
+  traffic loss, or proxy causality.
+- Require symptom-specific evidence and a controlled direct/bypass comparison before attributing
+  a failure to the proxy.
+- Rewrite the English and Chinese examples to preserve uncertainty when TCP succeeds.
+- Identify HTTP and model-server requests as version 0.3.1.
+
+### Added
+
+- Regression tests that keep deterministic fake-IP observations and the system prompt non-causal.
+- A versioned 20-scenario, five-runs-per-configuration real-model benchmark plan for v0.4.0.
+- A bounded pre-release Ollama F16 smoke record with explicit non-benchmark evidence limits.
+
 ## 0.3.0 — 2026-09-02
 
 ### Added

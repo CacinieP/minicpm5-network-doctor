@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  让一个 10 亿参数的小模型 + 七个只读工具，在你自己的机器上诊断 DNS 劫持、端口不通、
-  证书错误等真实网络问题。
+  让一个 10 亿参数的小模型 + 七个只读工具，在你自己的机器上调查异常 DNS 映射、端口不通、
+  证书错误等网络问题。
 </p>
 
 <p align="center">
@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-103%20passing-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-105%20passing-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-88%25-success" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
@@ -23,6 +23,7 @@
   <a href="#架构">架构</a> ·
   <a href="#安全边界">安全</a> ·
   <a href="./CHANGELOG.md">更新记录</a> ·
+  <a href="./docs/benchmark-plan.md">评测计划</a> ·
   <a href="#已知局限">局限</a> ·
   <a href="#开发">开发</a>
 </p>
@@ -38,29 +39,29 @@ HTTP、TLS、本地端口、代理环境和包下载问题。
 
 ## 看它工作
 
-一次典型的运行——开发者反馈 `npm install` 超时。Agent 解析主机名，发现地址落入了本地代理
-注入的 fake-ip 段，从而精准定位原因：
+一次典型的运行——开发者反馈 `npm install` 超时。Agent 解析主机名，识别出由代理管理的
+fake-IP 映射，并明确说明现有证据能够和不能证明什么：
 
 ```text
 $ minicpm-network-doctor \
     "npm install 从 registry.example.org 下载时超时，请检查最可能的网络原因"
 
-Diagnosis: registry.example.org 的 DNS 正被一个运行在 fake-ip 模式的本地代理劫持。
-主机名被解析进 198.18.0.0/15 保留段，而不是真实服务器地址，因此包请求被拦截或黑洞。
+Diagnosis: registry.example.org 被解析为本地代理管理的 fake-IP 映射，说明 DNS 处于代理
+管理路径。与该映射地址的 TCP 连接成功，因此现有证据不能证明该映射或代理导致了 npm 超时。
 
 Evidence:
 - resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
-  观察提示："commonly injected by Clash/Mihomo fake-ip DNS hijacking"
+  观察提示："proxy-managed DNS path; mapping alone does not establish a connectivity failure"
 - test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
 
-Recommended action: 把 registry.example.org 加入代理的直连/绕过列表（或对该域名把代理
-从 fake-ip 切换到 redir-host 模式）。回滚方式：删除该条目即可。
+Recommended action: 只为 registry.example.org 临时增加直连/绕过规则并重试一次，作为
+受控对照。回滚方式：删除这一条临时规则。
 
-Verification: curl -v https://registry.example.org/  # 应到达真实 CDN IP，而非 198.x
+Verification: curl -v --connect-timeout 10 https://registry.example.org/
 ```
 
-上面每一个数值都由只读工具产生并原样呈现——模型绝不会伪造它没有执行过的检查。需要完整
-工具轨迹时，加上 `--json`。
+Evidence 段中的数值全部由只读工具产生并原样呈现。模型的诊断仍可能存在不确定性，不得把
+特殊用途地址分类直接升级为未经证实的根因结论。需要完整工具轨迹时，加上 `--json`。
 
 ## 为什么做这个项目
 
@@ -97,7 +98,7 @@ Verification: curl -v https://registry.example.org/  # 应到达真实 CDN IP，
        │ OpenAI 兼容 tool_calls
        ▼
 白名单 Python 工具
-DNS · TCP · HTTP · TLS · 代理环境 · 系统信息
+DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
        │
        ▼
 证据 → 诊断 → 一个可逆建议 → 验证
@@ -131,7 +132,7 @@ XML 风格调用转换为标准 OpenAI 兼容 `tool_calls`。
 
 ## 快速开始
 
-> **分发状态：** v0.3.0 通过 GitHub Releases 发布。本项目目前未发布到 PyPI；请按下文从仓库安装。
+> **分发状态：** 正式版本通过 GitHub Releases 分发。本项目目前未发布到 PyPI；请按下文从仓库安装。
 
 这是一个独立的社区项目，与 OpenBMB 不存在隶属关系，也未获得其官方背书。
 
@@ -289,6 +290,8 @@ MiniCPM5-1B 是一个 10 亿参数的小模型。运行时添加了多重防护�
 - **量化会降低工具调用稳定性。** 高度量化的 GGUF（`Q4_K_M`）会生成更长的思维链，更容易漂移或
   被截断，不如 `F16` 稳定。诊断循环推荐使用 `F16`。`--thinking` 对疑难场景有帮助，但也会把更多
   token 预算花在推理上，本身也可能截断答案。
+- **fake-IP 映射不是根因。** 它只说明 DNS 处于代理管理路径，该路径也可能完全正常。没有受控的
+  直连/绕过对照时，Agent 必须把代理是否导致故障标记为未确认。
 - **无写权限。** Agent 只做观察，不能刷新 DNS、切换代理、重启服务或应用任何修复。给出的建议都
   是需要用户自己执行的可逆操作。
 - **无深度报文或路由检查。** 工具覆盖 DNS、TCP、HTTP、TLS 和代理环境变量。没有 `traceroute`、
@@ -317,6 +320,7 @@ minicpm-network-doctor/
 │   └── tools.py               # 只读诊断工具
 ├── skills/
 │   └── minicpm-network-doctor/
+├── docs/benchmark-plan.md     # 规划中的真实模型端到端评测
 ├── tests/
 ├── .github/workflows/ci.yml
 ├── pyproject.toml
@@ -337,8 +341,9 @@ python /path/to/skill-creator/scripts/quick_validate.py \
   skills/minicpm-network-doctor
 ```
 
-单元测试使用假的 OpenAI 兼容客户端，不会下载模型，也不需要 GPU。真实的端到端诊断
-需要一个正在运行且工具调用解析正常的 MiniCPM5 接口。
+单元测试使用假的 OpenAI 兼容客户端，不会下载模型，也不需要 GPU。一次人工端到端运行只能
+证明传输链路和工具循环能工作，不能证明诊断准确率或多次运行稳定性。只有完成
+[真实模型评测计划](docs/benchmark-plan.md)后，才应对外声明可靠性指标。
 
 ## 致谢
 

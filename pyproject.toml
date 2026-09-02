@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "minicpm-network-doctor"
-version = "0.3.0"
+version = "0.3.1"
 description = "Evidence-first, read-only network diagnostics with local MiniCPM tool calling"
 readme = "README.md"
 requires-python = ">=3.10"

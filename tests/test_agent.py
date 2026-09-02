@@ -15,6 +15,7 @@ from minicpm_network_doctor.agent import (
     _is_unsupported_tool_choice,
     _response_message,
 )
+from minicpm_network_doctor.prompt import load_system_prompt
 
 
 class BadRequestError(Exception):
@@ -23,6 +24,15 @@ class BadRequestError(Exception):
     def __init__(self, message: str, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def test_system_prompt_requires_corroboration_for_fake_ip() -> None:
+    prompt = load_system_prompt().lower()
+
+    assert "path/topology evidence only" in prompt
+    assert "does not by itself prove" in prompt
+    assert "controlled direct/bypass" in prompt
+    assert "strong evidence of dns hijacking" not in prompt
 
 
 def _tool_call(name: str, arguments: dict, call_id: str = "call-1") -> SimpleNamespace:

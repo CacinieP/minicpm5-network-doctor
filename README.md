@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  Catch the network problems an LLM can actually diagnose — DNS hijacking, dead ports, broken TLS —
-  with a 1B model and seven read-only tools, all running on your own machine.
+  Investigate unexpected DNS mappings, dead ports, and broken TLS with a 1B model and seven
+  read-only tools, all running on your own machine.
 </p>
 
 <p align="center">
@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-103%20passing-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-105%20passing-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-88%25-success" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
@@ -23,6 +23,7 @@
   <a href="#architecture">Architecture</a> ·
   <a href="#safety-boundary">Safety</a> ·
   <a href="./CHANGELOG.md">Changelog</a> ·
+  <a href="./docs/benchmark-plan.md">Benchmark plan</a> ·
   <a href="#known-limitations">Limitations</a> ·
   <a href="#development">Development</a>
 </p>
@@ -40,29 +41,31 @@ proxy environment, and package download problems without giving the model arbitr
 ## See it work
 
 A typical run — a developer reports that `npm install` times out. The agent resolves the host,
-spots that the address is in the fake-ip range injected by a local proxy, and pinpoints the cause:
+recognizes a proxy-managed fake-IP mapping, and states what that evidence can and cannot establish:
 
 ```text
 $ minicpm-network-doctor \
     "npm install times out fetching registry.example.org; check the likely network cause"
 
-Diagnosis: DNS for registry.example.org is being hijacked by a local proxy running in
-fake-ip mode. The hostname resolves into the 198.18.0.0/15 reserved range instead of a
-real server address, so the package request is intercepted or blackholed.
+Diagnosis: registry.example.org resolves to a fake-IP mapping managed by a local proxy.
+This confirms that DNS is on a proxy-managed path. The TCP connection to the mapped
+address succeeded, so the current evidence does not establish that the mapping or proxy
+caused the npm timeout.
 
 Evidence:
 - resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
-  observation: "commonly injected by Clash/Mihomo fake-ip DNS hijacking"
+  observation: "proxy-managed DNS path; mapping alone does not establish a connectivity failure"
 - test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
 
-Recommended action: add registry.example.org to your proxy's direct/bypass list (or switch
-the proxy from fake-ip to redir-host mode for this domain). Roll back by removing the entry.
+Recommended action: temporarily add only registry.example.org to the proxy's direct/bypass
+list and retry once as a controlled comparison. Roll back by removing that one rule.
 
-Verification: curl -v https://registry.example.org/  # should reach a real CDN IP, not 198.x
+Verification: curl -v --connect-timeout 10 https://registry.example.org/
 ```
 
-Every value above is produced by the read-only tools and surfaced verbatim — the model never
-invents a check it did not run. For the full tool trace, pass `--json`.
+Every value under Evidence is produced by the read-only tools and surfaced verbatim. The model's
+diagnosis may still be uncertain; it must not turn a special-use address classification into an
+unsupported root-cause claim. For the full tool trace, pass `--json`.
 
 ## Why This Project
 
@@ -101,7 +104,7 @@ Developer symptom or error
           │ OpenAI-compatible tool_calls
           ▼
   Allowlisted Python tools
-  DNS · TCP · HTTP · TLS · proxy env · system context
+  DNS · TCP · HTTP · TLS · proxy env · hosts file · system context
           │
           ▼
  Evidence → diagnosis → one reversible recommendation → verification
@@ -150,7 +153,7 @@ Four runtime controls keep the small model honest and resilient:
 
 ## Quick Start
 
-> **Distribution status:** v0.3.0 is released through GitHub Releases. This package is not
+> **Distribution status:** releases are distributed through GitHub Releases. This package is not
 > currently published on PyPI; install it from the repository as shown below.
 
 This is an independent community project and is not affiliated with or endorsed by OpenBMB.
@@ -324,6 +327,9 @@ solved in code:
   truncation than `F16`. Prefer `F16` for the most reliable diagnosis loop. The
   `--thinking` flag helps with hard cases but also consumes more of the token
   budget on reasoning, which can itself truncate the answer.
+- **A fake-IP mapping is not a root cause.** It indicates a proxy-managed DNS
+  path, which may be normal and healthy. Without a controlled direct/bypass
+  comparison, the agent must leave the proxy's causal role unconfirmed.
 - **No write access.** The agent only observes. It cannot flush DNS, toggle a
   proxy, restart a service, or apply any fix. Recommendations are reversible
   suggestions the user must run themselves.
@@ -359,6 +365,7 @@ minicpm-network-doctor/
 │   └── tools.py               # Read-only diagnostic tools
 ├── skills/
 │   └── minicpm-network-doctor/
+├── docs/benchmark-plan.md     # Planned real-model E2E evaluation
 ├── tests/
 ├── .github/workflows/ci.yml
 ├── pyproject.toml
@@ -380,7 +387,9 @@ python /path/to/skill-creator/scripts/quick_validate.py \
 ```
 
 Unit tests use a fake OpenAI-compatible client, so they do not download the model or require a GPU.
-A real end-to-end diagnosis requires a running MiniCPM5 endpoint with working tool-call parsing.
+A manual end-to-end run can prove that the transport and tool loop work, but it does not establish
+diagnostic accuracy or run-to-run stability. See the [real-model benchmark plan](docs/benchmark-plan.md)
+for the evidence required before making reliability claims.
 
 ## Credits
 

@@ -20,7 +20,7 @@ from typing import Any
 
 from .scope import normalize_host, validate_tool_scope
 
-USER_AGENT = "minicpm-network-doctor/0.3"
+USER_AGENT = "minicpm-network-doctor/0.3.1"
 _HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
 
 
@@ -100,7 +100,8 @@ def _classify_address(address: str) -> str:
     Returns one of: ``public`` or a reserved-block label such as
     ``fake-ip (198.18.0.0/15)``, ``loopback``, ``private``, ``link-local``,
     ``documentation``, or ``reserved``. Surfacing this label lets the small
-    model reason about DNS hijacking without memorising IANA allocations.
+    model recognize special-use and proxy-managed address paths without
+    treating the classification itself as proof of a fault.
     """
     try:
         ip = ipaddress.ip_address(address)
@@ -118,7 +119,7 @@ def _classify_address(address: str) -> str:
         "192.168.0.0/16": "private",
         "fc00::/7": "private",
         # RFC 2544 benchmarking range, reused by Clash/Mihomo as the default
-        # fake-ip pool when DNS hijacking is enabled.
+        # pool for synthetic fake-IP DNS mappings.
         "198.18.0.0/15": "fake-ip (198.18.0.0/15)",
         # RFC 6598 carrier-grade NAT (100.64.0.0/10), also reused by
         # Tailscale and some proxies as an overlay address pool.
@@ -236,9 +237,10 @@ def resolve_dns(host: str, port: int = 443) -> dict[str, Any]:
         if label.startswith("fake-ip"):
             observations.append(
                 f"The resolved address is in the {label} range, which is a reserved "
-                "benchmarking block commonly injected by Clash/Mihomo fake-ip DNS "
-                "hijacking. The real upstream IP is hidden; the proxy may be "
-                "intercepting or blackholing this traffic."
+                "benchmarking block commonly used by Clash/Mihomo for synthetic "
+                "fake-IP DNS mappings. This identifies a proxy-managed DNS path. "
+                "By itself, the mapping does not establish a connectivity failure "
+                "or explain the reported symptom."
             )
         elif label.startswith("cg nat"):
             observations.append(
