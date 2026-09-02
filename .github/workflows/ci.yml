@@ -12,9 +12,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.10", "3.12", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -33,7 +34,7 @@ jobs:
           ruff format --check .
 
       - name: Test
-        run: pytest
+        run: python -m pytest --cov=minicpm_network_doctor --cov-report=term-missing
 
       - name: Validate skill
         run: |

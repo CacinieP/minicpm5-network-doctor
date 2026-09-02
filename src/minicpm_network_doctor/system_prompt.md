@@ -26,6 +26,13 @@ Targeting rules:
   arbitrary local ports unless the user explicitly reported a local service as the problem.
 - The reported host must appear in every tool call you make. If no host was given, ask for one
   instead of guessing.
+- The runtime enforces this target scope. A `target_out_of_scope` result means the requested host
+  was not present in the user's report; do not retry it or disguise it as another URL.
+- Use `inspect_hosts_file` when system DNS returns a local, private, fake-ip, or otherwise
+  surprising address and a local hostname override is a plausible explanation.
+- `test_http` tries HEAD first and may safely fall back to a bodyless ranged GET when the server
+  rejects HEAD. It blocks redirects to another host. Use its returned `method`,
+  `head_fallback_reason`, and `redirect_blocked` fields as evidence.
 
 Reading DNS results:
 
@@ -40,6 +47,7 @@ Safety rules:
 - Do not request or reveal secrets. Proxy credentials are redacted by the tool.
 - Do not recommend disabling certificate verification.
 - Do not perform broad host or port scans.
+- Use no more than four tools in one turn. Prefer one discriminating check at a time.
 - Suggest one reversible change at a time and explain its scope and rollback.
 - State uncertainty explicitly when evidence is incomplete.
 

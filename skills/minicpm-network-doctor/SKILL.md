@@ -1,25 +1,39 @@
 ---
 name: minicpm-network-doctor
-description: Operate the MiniCPM5 Network Doctor local diagnostic agent for evidence-based, read-only investigation of DNS failures, HTTP errors, TLS certificate problems, unreachable hosts, closed ports, proxy configuration, package download failures, and network timeouts. Use when a user wants to diagnose a development network error with a locally served MiniCPM5 model or validate that the Network Doctor CLI is configured correctly.
+description: Operate MiniCPM Network Doctor for evidence-based, read-only investigation of DNS, HTTP, TLS, port, proxy, hosts-file, package-download, and timeout failures. Use when diagnosing a development network error with a local OpenAI-compatible MiniCPM endpoint or validating the CLI and model-server connection.
 ---
 
-# MiniCPM5 Network Doctor
+# MiniCPM Network Doctor
 
 Use the local MiniCPM5 agent to collect a small amount of relevant evidence, explain the likely cause, recommend one reversible action, and state how to verify it.
 
 ## Workflow
 
-1. Capture the failed operation, exact error, target host, and whether the problem affects one target or many.
-2. Confirm that the local OpenAI-compatible MiniCPM5 endpoint is running with tool-call parsing enabled.
-3. Run:
+1. Capture the failed operation, exact error, and explicit target hostname, IP, or HTTP(S) URL. The
+   runtime rejects prompts without a target and network calls outside the original target set.
+2. When setup is uncertain, check the local OpenAI-compatible endpoint and its served model list:
+
+   ```bash
+   minicpm-network-doctor --check-server
+   ```
+
+   Loopback endpoints connect directly by default to avoid desktop-proxy interference. Only use
+   `--use-model-proxy` when the configured local server is intentionally reached through a proxy;
+   use `--no-model-proxy` to force a direct remote connection.
+
+3. Run the focused diagnosis. Use `--progress` when live evidence on stderr is useful, and `--json`
+   when the caller needs the stable status, targets, warnings, and complete tool trace:
 
    ```bash
    minicpm-network-doctor "<exact symptom and target>"
    ```
 
-4. Preserve the tool evidence in the result. Do not replace observed values with assumptions.
-5. Present the diagnosis, evidence, recommended action, and verification command separately.
-6. If evidence is inconclusive, request one additional targeted observation instead of proposing broad configuration changes.
+4. Preserve the tool evidence in the result. Treat `status: partial` as usable evidence with an
+   inconclusive model conclusion, not as a fully supported diagnosis.
+5. Present the diagnosis, evidence, one reversible recommended action, and verification command
+   separately.
+6. If evidence is inconclusive, request one additional targeted observation instead of proposing
+   broad configuration changes.
 
 ## Input guidance
 
@@ -46,5 +60,8 @@ DNS works in the browser, but the terminal command fails.
 - Never expose credentials contained in environment variables or URLs.
 - Never recommend disabling certificate verification as a fix.
 - Avoid broad scans. Test only the host and port relevant to the reported failure.
+- Do not work around `target_out_of_scope`; add a target only when the user actually reported it.
+- A plain model answer without tool evidence is not a diagnosis. Preserve the CLI's no-evidence
+  error and recommend checking backend tool-call parsing.
 - Explain the scope and rollback for every suggested configuration change.
 - Match the user's language.

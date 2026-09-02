@@ -4,7 +4,7 @@
 
 <p align="center">
   Catch the network problems an LLM can actually diagnose — DNS hijacking, dead ports, broken TLS —
-  with a 1B model and six read-only tools, all running on your own machine.
+  with a 1B model and seven read-only tools, all running on your own machine.
 </p>
 
 <p align="center">
@@ -12,7 +12,8 @@
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/coverage-37%20tests-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-103%20passing-success" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-88%25-success" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
 
@@ -21,6 +22,7 @@
   <a href="#see-it-work">Demo</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#safety-boundary">Safety</a> ·
+  <a href="./CHANGELOG.md">Changelog</a> ·
   <a href="#known-limitations">Limitations</a> ·
   <a href="#development">Development</a>
 </p>
@@ -71,6 +73,24 @@ invents a check it did not run. For the full tool trace, pass `--json`.
 - **Small-model friendly** — code controls the loop, schemas, limits, and duplicate-call handling.
 - **Bilingual** — the model is instructed to answer in the user's language.
 
+## What's New in 0.3
+
+- **Runtime target scoping** — network calls are rejected unless their host appeared explicitly in
+  the user's report; this safety boundary no longer depends on prompt compliance.
+- **No evidence, no diagnosis** — a backend that ignores forced tool choice is corrected and
+  retried. Plain-text guesses are never accepted as completed diagnoses.
+- **More accurate HTTP checks** — services that reject `HEAD` with 405/501 are retried with a
+  ranged `GET` without reading the response body; redirects to unreported hosts are blocked.
+- **Local override detection** — `inspect_hosts_file` reveals only entries matching the reported
+  host, without exposing unrelated mappings.
+- **Operational CLI** — `--check-server`, `--progress`, `--max-tool-calls`, stable JSON status, and
+  model-list discovery make local setup and automation easier to debug.
+- **Reliable local endpoints** — loopback model servers bypass environment/system proxies by
+  default, while remote endpoints retain proxy support; `--use-model-proxy` and
+  `--no-model-proxy` make the policy explicit.
+- **Backend-aware thinking control** — requests send both the SGLang chat-template switch and the
+  OpenAI-compatible `reasoning_effort` field used by current Ollama releases.
+
 ## Architecture
 
 ```text
@@ -96,22 +116,29 @@ model's XML-style calls into standard OpenAI-compatible `tool_calls`.
 |------|---------|
 | `resolve_dns` | Resolve one hostname and report IPv4/IPv6 results |
 | `test_tcp` | Attempt one connection to a specified host and port |
-| `test_http` | Send one HTTP/HTTPS HEAD request |
+| `test_http` | Send HEAD, block cross-host redirects, and use a bodyless ranged GET on 405/501 |
 | `inspect_tls` | Validate TLS and summarize the peer certificate |
-| `inspect_proxy_environment` | Read proxy environment variables with credentials redacted |
+| `inspect_proxy_environment` | Read environment and platform-effective proxies, with credentials redacted |
+| `inspect_hosts_file` | Check one reported host for a local hosts-file override |
 | `system_network_context` | Report OS context and redacted proxy settings |
 
 There is no arbitrary command or port-scanning tool.
 
 ## Agent Behavior
 
-Two loop controls keep the small model honest and resilient:
+Four runtime controls keep the small model honest and resilient:
 
 - **Evidence-first first turn.** The first model turn is sent with
   `tool_choice="required"`, so the model must call a diagnostic tool before it is
   allowed to answer. This prevents the common small-model failure of answering
   from priors ("I don't have that tool") instead of checking. If a backend rejects
-  `required`, the request is retried once with `auto`.
+  `required`, the request is retried once with `auto`. If a backend accepts but ignores the
+  requirement, its ungrounded answer is discarded and the runtime asks for evidence again.
+- **Target scope enforcement.** Hostnames, IP addresses, and URLs are extracted from the original
+  report. Any network tool call outside that allowlist receives `target_out_of_scope` and is not
+  executed.
+- **Bounded work.** At most four calls are accepted from one model turn and the diagnosis-wide
+  execution budget defaults to 12 calls (configurable up to 24).
 - **Graceful non-convergence.** If the model calls the same tool three turns in a
   row without finishing, or exhausts the turn budget, the runtime stops and
   returns a structured **partial diagnosis** — the four sections are still
@@ -199,7 +226,7 @@ Harder cases can enable MiniCPM5 thinking mode:
 
 ```bash
 minicpm-network-doctor --thinking \
-  "HTTPS works in a browser but the package manager reports a certificate error"
+  "HTTPS to registry.npmjs.org works in a browser but the package manager reports a certificate error"
 ```
 
 Print the complete tool trace as JSON:
@@ -207,6 +234,23 @@ Print the complete tool trace as JSON:
 ```bash
 minicpm-network-doctor --json "Check why https://example.com returns an error"
 ```
+
+Check the endpoint before starting a slower model turn, or watch evidence arrive in real time:
+
+```bash
+minicpm-network-doctor --check-server
+minicpm-network-doctor --progress "TLS fails for https://example.com"
+```
+
+Loopback endpoints such as Ollama at `127.0.0.1` connect directly by default so a desktop proxy
+cannot intercept the model request. Remote endpoints continue to honor proxy settings. Override
+either decision with `--use-model-proxy` or `--no-model-proxy`. Model API retries default to zero
+to keep a slow local failure bounded; use `--max-retries` only when a remote endpoint benefits
+from retries.
+
+`--json` includes `schema_version`, `status` (`complete`, `partial`, or `error`), `targets`,
+`warnings`, and the complete `tool_events` trace. Progress is written to stderr, so it is safe to
+combine with machine-readable JSON on stdout.
 
 ## Configuration
 
@@ -244,12 +288,19 @@ evidence, and separate diagnosis from verification.
 
 ## Safety Boundary
 
-- Only the six declared tools can execute.
+See [SECURITY.md](SECURITY.md) for the maintained security policy and vulnerability-reporting
+guidance.
+
+- Only the seven declared tools can execute.
+- Network tools are runtime-scoped to targets explicitly present in the original report.
 - Hosts, ports, URLs, timeouts, and tool arguments are validated.
 - Diagnostic URLs cannot contain credentials.
+- HTTP checks do not follow redirects to a host outside the original report.
+- Model preflight does not forward API keys across redirect origins; loopback endpoints bypass
+  proxies unless the user explicitly opts in.
 - Proxy credentials are redacted before results reach the model.
 - Duplicate tool calls are blocked.
-- Timeouts are bounded and broad scans are not supported.
+- Per-turn and diagnosis-wide tool budgets are bounded; broad scans are not supported.
 - The system prompt prohibits disabling certificate verification.
 - Configuration changes are suggestions only; the runtime never applies them.
 
@@ -259,12 +310,10 @@ MiniCPM5-1B is a 1B-parameter model. The runtime adds several guardrails to
 compensate, but some failure modes are inherent to the model and cannot be fully
 solved in code:
 
-- **Tool calling is not always reliable.** The first turn forces
-  `tool_choice="required"`, but some backends (notably Ollama) accept the value
-  yet occasionally return a plain-text answer with no `tool_calls`. When that
-  happens the model answers from priors instead of checking. This affects
-  roughly a minority of runs with `Q4_K_M` and cannot be fixed without a stronger
-  model.
+- **Tool calling is not always reliable.** Some backends (notably Ollama) accept
+  `tool_choice="required"` yet occasionally return plain text. The runtime rejects
+  those ungrounded answers and retries, but a persistently non-compliant backend
+  still ends with a clear no-evidence error instead of a diagnosis.
 - **Quantization degrades tool-call stability.** Heavily quantized GGUFs
   (`Q4_K_M`) emit longer chain-of-thought and are more prone to drift or
   truncation than `F16`. Prefer `F16` for the most reliable diagnosis loop. The
@@ -285,9 +334,9 @@ solved in code:
   diagnosis (see [Agent Behavior](#agent-behavior)) so the evidence is not lost;
   retry with `--thinking` or a more specific symptom for a sharper result.
 - **Backend-specific behavior.** SGLang (Linux/NVIDIA GPU) is the reference
-  backend. Ollama works on macOS but does not propagate the
-  `chat_template_kwargs.enable_thinking` body field, so thinking mode depends on
-  the server's own template defaults.
+  backend. Current Ollama releases honor OpenAI-compatible `reasoning_effort`,
+  while SGLang uses `chat_template_kwargs.enable_thinking`; older or different
+  runtimes may ignore one or both controls.
 
 When the model behaves erratically, the most effective escalation is a stronger
 model (e.g. MiniCPM5 4B/8B) on a backend that reliably parses tool calls, not
@@ -300,6 +349,7 @@ minicpm-network-doctor/
 ├── src/minicpm_network_doctor/
 │   ├── agent.py               # Tool-calling loop
 │   ├── cli.py                 # Command-line interface
+│   ├── scope.py               # Runtime target extraction and enforcement
 │   ├── system_prompt.md       # Small-model diagnostic policy
 │   └── tools.py               # Read-only diagnostic tools
 ├── skills/
@@ -319,7 +369,7 @@ pip install -e ".[dev]"
 
 ruff check .
 ruff format --check .
-pytest
+pytest --cov=minicpm_network_doctor
 python /path/to/skill-creator/scripts/quick_validate.py \
   skills/minicpm-network-doctor
 ```

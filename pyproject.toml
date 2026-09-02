@@ -1,27 +1,28 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "minicpm-network-doctor"
-version = "0.2.0"
-description = "A safe local network diagnostic agent powered by MiniCPM5 tool calling"
+version = "0.3.0"
+description = "Evidence-first, read-only network diagnostics with local MiniCPM tool calling"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "CacinieP" }]
 keywords = ["minicpm5", "network", "diagnostics", "agent", "tool-calling"]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: System :: Networking",
 ]
-dependencies = ["openai>=1.68"]
+dependencies = ["openai>=1.68,<4"]
 
 [project.optional-dependencies]
 dev = [
@@ -38,6 +39,7 @@ minicpm-network-doctor = "minicpm_network_doctor.cli:main"
 Homepage = "https://github.com/CacinieP/minicpm5-network-doctor"
 Repository = "https://github.com/CacinieP/minicpm5-network-doctor"
 Issues = "https://github.com/CacinieP/minicpm5-network-doctor/issues"
+Changelog = "https://github.com/CacinieP/minicpm5-network-doctor/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -48,6 +50,15 @@ minicpm_network_doctor = ["system_prompt.md"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["minicpm_network_doctor"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 line-length = 100
