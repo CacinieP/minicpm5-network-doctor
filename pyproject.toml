@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "minicpm-network-doctor"
-version = "0.3.1"
+version = "0.3.2"
 description = "Evidence-first, read-only network diagnostics with local MiniCPM tool calling"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,7 @@ dev = [
   "pyyaml>=6.0",
   "pytest>=8.3",
   "pytest-cov>=6.0",
+  "pytest-socket>=0.7,<1",
   "ruff>=0.9",
 ]
 
@@ -48,7 +49,7 @@ where = ["src"]
 minicpm_network_doctor = ["system_prompt.md"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q --disable-socket"
 testpaths = ["tests"]
 
 [tool.coverage.run]

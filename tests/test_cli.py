@@ -237,6 +237,22 @@ def test_check_server_tolerates_non_json_model_list(monkeypatch) -> None:
     assert _check_server_reachable("http://localhost:30000/v1")["models"] == []
 
 
+@pytest.mark.parametrize(
+    "body",
+    [b'{"data":null}', b'{"data":1}', b'{"data":{}}', b"null", b"[]", b"\xff\xfe\xff"],
+)
+def test_check_server_tolerates_malformed_model_metadata(monkeypatch, body) -> None:
+    _patch_server_open(
+        monkeypatch,
+        lambda request, timeout: _fake_response(body=body),  # noqa: ARG005
+    )
+
+    result = _check_server_reachable("http://localhost:30000/v1")
+
+    assert result["ok"] is True
+    assert result["models"] == []
+
+
 def test_check_server_cli_success_and_json_error(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         "minicpm_network_doctor.cli._check_server_reachable",

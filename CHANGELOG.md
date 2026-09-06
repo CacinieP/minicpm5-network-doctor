@@ -2,6 +2,32 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## 0.3.2 — 2026-09-06
+
+### Fixed
+
+- Keep domains embedded in URL credentials, paths, queries, and fragments outside the target
+  allowlist; preserve the actual authority when extracting IPv6 URLs.
+- Handle malformed model-list metadata without an uncaught exception during server preflight.
+- Redact malformed proxy URLs without exposing credentials through parser errors.
+- Share the versioned User-Agent between HTTP diagnostics and model-server preflight.
+
+### Added
+
+- Offline tests with DNS/socket guards and isolated proxy/model environment settings.
+- CI for Python 3.10–3.14 on Ubuntu, with macOS and Windows coverage on Python 3.12.
+- Wheel/sdist builds, strict package metadata validation, dependency advisory checks, and clean
+  installs outside the checkout on Linux, macOS, and Windows.
+- Version, changelog, prompt-resource, skill metadata, and release tag consistency checks.
+- A required aggregate CI result, retained test reports, and release artifacts with SHA-256 sums.
+- Commit-pinned GitHub Actions with monthly Dependabot updates.
+
+### Validation scope
+
+- Tests and installed-package smoke checks require no Ollama, model weights, or model server.
+- These checks do not establish real-model diagnosis accuracy; the benchmark remains pending.
+- Distribution remains GitHub Releases only. PyPI publication is still deferred.
+
 ## 0.3.1 — 2026-09-02
 
 ### Changed

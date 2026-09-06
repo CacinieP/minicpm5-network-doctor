@@ -38,7 +38,14 @@ def test_tool_schemas_match_registry() -> None:
     assert all(item["function"]["parameters"]["additionalProperties"] is False for item in schemas)
 
 
-def test_resolve_localhost() -> None:
+def test_resolve_localhost(monkeypatch) -> None:
+    records = [
+        (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 443)),
+        (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 443, 0, 0)),
+    ]
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo", lambda *args, **kwargs: records
+    )
     result = resolve_dns("localhost")
     assert result["ok"] is True
     assert result["addresses"]
@@ -217,6 +224,23 @@ def test_invalid_proxy_port_is_hidden(monkeypatch) -> None:
     result = inspect_proxy_environment()
 
     assert result["proxy_variables"]["HTTP_PROXY"] == "[set; invalid port hidden]"
+
+
+@pytest.mark.parametrize(
+    "proxy", ["http://user:secret@[broken", "http://user:secret@example.com：80"]
+)
+def test_malformed_proxy_urls_do_not_expose_credentials(monkeypatch, proxy) -> None:
+    monkeypatch.setenv("HTTP_PROXY", proxy)
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.urllib.request.getproxies", lambda: {"https": proxy}
+    )
+
+    result = execute_tool("inspect_proxy_environment", {})
+
+    assert result["ok"] is True
+    assert result["proxy_variables"]["HTTP_PROXY"] == "[set; invalid URL hidden]"
+    assert result["effective_proxies"]["HTTPS"] == "[set; invalid URL hidden]"
+    assert "secret" not in str(result)
 
 
 @pytest.mark.parametrize(

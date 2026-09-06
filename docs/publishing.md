@@ -1,4 +1,15 @@
-# PyPI publication plan (deferred)
+# Publishing
+
+## GitHub Releases
+
+GitHub Releases are the current distribution channel. Before publication, update the package
+version and changelog, then require every [CI check](ci.md) to pass for the exact commit. Create
+the matching version tag, wait for its CI run to succeed, and publish that run's `distributions`
+artifact (wheel, sdist, and `SHA256SUMS`). Verify the public tag, downloaded hashes, and clean
+installation after publishing. Do not rebuild different files after CI and label them as the
+tested artifacts.
+
+## PyPI publication plan (deferred)
 
 Status as of 2026-09-02: **deferred**.
 

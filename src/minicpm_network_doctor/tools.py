@@ -20,7 +20,7 @@ from typing import Any
 
 from .scope import normalize_host, validate_tool_scope
 
-USER_AGENT = "minicpm-network-doctor/0.3.1"
+USER_AGENT = "minicpm-network-doctor/0.3.2"
 _HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
 
 
@@ -393,7 +393,12 @@ def inspect_tls(host: str, port: int = 443, timeout: float = 8.0) -> dict[str, A
 def _redact_proxy_value(value: str | None) -> str | None:
     if not value:
         return None
-    parsed = urllib.parse.urlsplit(value)
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        # Parser errors can quote the complete authority, including credentials.
+        # An invalid local setting must never escape through the tool error path.
+        return "[set; invalid URL hidden]"
     if not parsed.scheme or not parsed.hostname:
         return "[set; value hidden]"
     host = parsed.hostname

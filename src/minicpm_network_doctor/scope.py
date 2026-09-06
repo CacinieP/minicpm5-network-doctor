@@ -8,14 +8,14 @@ from typing import Any
 
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _HOST_PATTERN = re.compile(
-    r"(?<![\w@])"
+    r"(?<![\w@./-])"
     r"(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|"
     r"(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+"
     r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)"
-    r"(?::\d{1,5})?",
+    r"\.?(?::\d{1,5})?(?![\w.-])",
     re.IGNORECASE,
 )
-_BRACKETED_IPV6_PATTERN = re.compile(r"\[([0-9a-f:.%]+)](?::\d{1,5})?", re.IGNORECASE)
+_BRACKETED_IPV6_PATTERN = re.compile(r"\[([^\]\s]*:[^\]\s]+)](?::\d{1,5})?")
 _SINGLE_LABEL_PORT_PATTERN = re.compile(
     r"(?<![\w@./-])([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?):\d{1,5}(?!\d)",
     re.IGNORECASE,
@@ -48,27 +48,37 @@ def extract_targets(query: str) -> frozenset[str]:
     targets: set[str] = set()
 
     for match in _URL_PATTERN.finditer(query):
-        candidate = match.group(0).rstrip(".,;:!?)]}")
+        candidate = match.group(0).rstrip(".,;:!?)}")
+        # Keep the closing bracket belonging to an IPv6 authority, but remove
+        # a prose/Markdown bracket around the complete URL.
+        while candidate.endswith("]") and candidate.count("]") > candidate.count("["):
+            candidate = candidate[:-1]
         try:
             hostname = urllib.parse.urlsplit(candidate).hostname
-        except ValueError:
-            hostname = None
-        if hostname:
-            targets.add(normalize_host(hostname))
+            if hostname:
+                targets.add(normalize_host(hostname))
+        except (UnicodeError, ValueError):
+            continue
 
-    for match in _BRACKETED_IPV6_PATTERN.finditer(query):
+    # A domain in a URL path, query, fragment, or userinfo is not the destination.
+    # Do not let the standalone-host recognizers expand the authorized scope
+    # with those strings, even if the URL itself was malformed.
+    remaining = _URL_PATTERN.sub(" ", query)
+
+    for match in _BRACKETED_IPV6_PATTERN.finditer(remaining):
         try:
+            ipaddress.IPv6Address(match.group(1).split("%", 1)[0])
             targets.add(normalize_host(match.group(1)))
         except (UnicodeError, ValueError):
             continue
 
-    for match in _SINGLE_LABEL_PORT_PATTERN.finditer(query):
-        targets.add(normalize_host(match.group(1)))
+    remaining = _BRACKETED_IPV6_PATTERN.sub(" ", remaining)
 
     # IPv6 literals without brackets are unambiguous only when they do not carry
     # a port. Token parsing lets ipaddress perform the strict validation.
-    for token in query.split():
-        candidate = token.strip(".,;!?()[]{}<>\"'")
+    standalone = list(remaining)
+    for match in re.finditer(r"\S+", remaining):
+        candidate = match.group(0).strip(".,;!?()[]{}<>\"'")
         if candidate.count(":") < 2:
             continue
         try:
@@ -77,8 +87,15 @@ def extract_targets(query: str) -> frozenset[str]:
         except ValueError:
             continue
         targets.add(normalize_host(candidate))
+        # A numeric IPv6 segment is not a hostname:port pair, and an embedded
+        # IPv4 suffix is not a separately authorized destination.
+        standalone[match.start() : match.end()] = " " * (match.end() - match.start())
+    remaining = "".join(standalone)
 
-    for match in _HOST_PATTERN.finditer(query):
+    for match in _SINGLE_LABEL_PORT_PATTERN.finditer(remaining):
+        targets.add(normalize_host(match.group(1)))
+
+    for match in _HOST_PATTERN.finditer(remaining):
         candidate = match.group(0)
         if candidate.count(":") == 1:
             candidate = candidate.rsplit(":", 1)[0]

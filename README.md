@@ -12,8 +12,8 @@
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-105%20passing-success" alt="Tests">
-  <img src="https://img.shields.io/badge/coverage-88%25-success" alt="Coverage">
+  <img src="https://img.shields.io/badge/tests-offline%20suite-success" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-minimum%2085%25-success" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
 
@@ -382,11 +382,14 @@ pip install -e ".[dev]"
 ruff check .
 ruff format --check .
 pytest --cov=minicpm_network_doctor
-python /path/to/skill-creator/scripts/quick_validate.py \
-  skills/minicpm-network-doctor
+python scripts/verify_metadata.py
 ```
 
-Unit tests use a fake OpenAI-compatible client, so they do not download the model or require a GPU.
+CI covers Python 3.10–3.14 on Linux, plus Python 3.12 on macOS and Windows. Tests block
+DNS and sockets and use fake OpenAI-compatible clients: no Ollama, model downloads, GPU,
+API key, or running model server is required. CI also checks dependency advisories and installs
+both the wheel and source distribution in fresh environments outside the checkout.
+See [CI and release checks](docs/ci.md) for the matrix, coverage gate, and package smoke checks.
 A manual end-to-end run can prove that the transport and tool loop work, but it does not establish
 diagnostic accuracy or run-to-run stability. See the [real-model benchmark plan](docs/benchmark-plan.md)
 for the evidence required before making reliability claims.

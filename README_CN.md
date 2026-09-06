@@ -12,8 +12,8 @@
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-105%20passing-success" alt="Tests">
-  <img src="https://img.shields.io/badge/coverage-88%25-success" alt="Coverage">
+  <img src="https://img.shields.io/badge/tests-offline%20suite-success" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-minimum%2085%25-success" alt="Coverage">
   <img src="https://img.shields.io/badge/license-MIT-yellow" alt="MIT License">
 </p>
 
@@ -337,12 +337,14 @@ pip install -e ".[dev]"
 ruff check .
 ruff format --check .
 pytest --cov=minicpm_network_doctor
-python /path/to/skill-creator/scripts/quick_validate.py \
-  skills/minicpm-network-doctor
+python scripts/verify_metadata.py
 ```
 
-单元测试使用假的 OpenAI 兼容客户端，不会下载模型，也不需要 GPU。一次人工端到端运行只能
-证明传输链路和工具循环能工作，不能证明诊断准确率或多次运行稳定性。只有完成
+CI 覆盖 Linux 上的 Python 3.10–3.14，以及 macOS、Windows 上的 Python 3.12。测试使用模拟
+客户端并拦截 DNS 和套接字访问，不需要 Ollama、模型下载、GPU、API 密钥或运行中的模型服务。
+CI 还检查依赖漏洞，并在仓库外的独立环境中分别安装、验证 wheel 和源码包。详见
+[CI 与发版检查](docs/ci.md)。一次人工端到端运行只能证明传输链路和工具循环能工作，
+不能证明诊断准确率或多次运行稳定性。只有完成
 [真实模型评测计划](docs/benchmark-plan.md)后，才应对外声明可靠性指标。
 
 ## 致谢

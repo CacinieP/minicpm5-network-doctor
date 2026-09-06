@@ -13,7 +13,7 @@ from typing import Any
 
 from . import __version__
 from .agent import NetworkDoctor, NetworkDoctorError, ToolEvent
-from .tools import TOOLS
+from .tools import TOOLS, USER_AGENT
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -192,7 +192,7 @@ def _check_server_reachable(
     before the failure surfaces.
     """
     url = _models_url(base_url)
-    headers = {"User-Agent": "minicpm-network-doctor/0.3.1"}
+    headers = {"User-Agent": USER_AGENT}
     if api_key and api_key != "not-needed":
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, headers=headers)
@@ -238,12 +238,14 @@ def _check_server_reachable(
     if body:
         try:
             payload = json.loads(body)
-            models = [
-                item["id"]
-                for item in payload.get("data", [])
-                if isinstance(item, dict) and isinstance(item.get("id"), str)
-            ]
-        except (json.JSONDecodeError, AttributeError):
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if isinstance(data, list):
+                models = [
+                    item["id"]
+                    for item in data
+                    if isinstance(item, dict) and isinstance(item.get("id"), str)
+                ]
+        except (json.JSONDecodeError, UnicodeDecodeError):
             pass
     return {
         "ok": True,

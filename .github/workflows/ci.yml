@@ -3,47 +3,166 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
-  test:
+  quality:
+    name: Lint and metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.12", "3.14"]
-
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          python-version: ${{ matrix.python-version }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
           cache: pip
-
-      - name: Install
-        run: python -m pip install -e ".[dev]"
-
-      - name: Lint
+      - run: python -m pip install -e ".[dev]"
+      - name: Lint and format
         run: |
           ruff check .
           ruff format --check .
+      - name: Validate version, prompt resource, and skill metadata
+        run: python scripts/verify_metadata.py
 
-      - name: Test
-        run: python -m pytest --cov=minicpm_network_doctor --cov-report=term-missing
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Test with DNS and sockets blocked (no model service)
+        run: >-
+          python -m pytest --cov=minicpm_network_doctor
+          --cov-report=term-missing --cov-report=xml:coverage.xml
+          --junitxml=test-results.xml
+      - name: Save test evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            test-results.xml
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Validate skill
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install build twine
+      - name: Build wheel through sdist and validate metadata
         run: |
-          python /dev/stdin <<'PY'
-          from pathlib import Path
+          python -m build
+          python -m twine check --strict dist/*
+      - name: Record release checksums
+        working-directory: dist
+        run: sha256sum -- *.whl *.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
 
-          skill = Path("skills/minicpm-network-doctor/SKILL.md").read_text()
-          assert skill.startswith("---\n")
-          assert "\nname: minicpm-network-doctor\n" in skill
-          assert "\ndescription:" in skill
-          assert "TODO" not in skill
-          PY
+  package:
+    name: Install packages (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: distributions
+          path: dist/
+      - name: Install wheel and sdist in separate clean environments
+        run: python scripts/verify_package.py dist --work-dir "${{ runner.temp }}"
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e . pip-audit
+      - name: Audit dependencies (unpublished local project excluded)
+        run: python -m pip_audit --skip-editable
+
+  ci:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [quality, test, build, package, audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every check to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          test "$RESULTS" = "success,success,success,success,success"
