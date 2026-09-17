@@ -225,6 +225,10 @@ minicpm-network-doctor --thinking \
 运行时会返回携带已收集证据的部分诊断而不是失败，并在 `warnings` 里报告
 `model_response_truncated_by_budget`。
 
+需要注意：即使给到 8192 也不能保证收敛——实测中一次多轮的 `--thinking` 在四个工具调用全部成功后
+仍然被截断。继续调大默认值只会让每一轮都变慢、逼近超时上限，所以这个预算留给你自己决定，
+而不是运行时猜一个值。
+
 以 JSON 输出完整工具轨迹：
 
 ```bash

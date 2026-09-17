@@ -40,6 +40,15 @@ All notable changes are documented here. The project follows semantic versioning
 - A non-thinking diagnosis of an npm registry timeout returned all four required sections with
   correct fake-IP classification.
 
+### Known gaps
+
+- `--thinking` truncated again at the 8192 default on a multi-turn run, so 2B thinking does not
+  reliably converge. The evidence now survives as a partial diagnosis with
+  `model_response_truncated_by_budget`, but no diagnosis is produced. `--max-tokens` is the knob;
+  a larger fixed default would only lengthen every turn against the 600s timeout ceiling.
+- One symptom per mode, one run each. No scenario suite and no repetitions, so no accuracy or
+  run-to-run stability claim is made.
+
 ## 0.3.2 — 2026-09-06
 
 ### Fixed

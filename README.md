@@ -252,6 +252,11 @@ Override either budget directly, e.g. `--thinking --max-tokens 4096 --timeout 30
 turn still runs out of room, the runtime returns a partial diagnosis carrying the evidence already
 collected rather than failing, and reports `model_response_truncated_by_budget` in `warnings`.
 
+Note that even 8192 does not guarantee convergence: in testing, a multi-turn `--thinking` run still
+truncated after four successful tool calls. Raising the default further would only lengthen every
+turn against the timeout ceiling, so the budget stays a knob you own rather than a value the
+runtime guesses at.
+
 Print the complete tool trace as JSON:
 
 ```bash
