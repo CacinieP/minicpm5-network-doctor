@@ -137,10 +137,49 @@ DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
 
 这是一个独立的社区项目，与 OpenBMB 不存在隶属关系，也未获得其官方背书。
 
+### 如何使用
+
+两个进程，各自启动：
+
+| | 谁启动 | 时机 |
+|---|---|---|
+| **模型服务**（`llama-server`） | 你自己 | 诊断之前起好，期间保持运行 |
+| **Network Doctor**（`minicpm-network-doctor`） | 你自己 | 每次诊断跑一次 |
+
+**Network Doctor 不会启动、停止或管理模型服务。** 它只是一个 OpenAI 兼容客户端：端点没起来时它快速报错退出，不会自己去加载任何东西。
+
+日常循环：
+
+```bash
+# 1. 起模型服务（另一个终端，或交给后台服务托管）
+llama-server -m ~/models/MiniCPM5-2B-Q4_K_M.gguf --alias minicpm5-2b --port 8080 -ngl 99 -c 65536
+
+# 2. 确认它应答（很快，2.5 秒超时；不会白等满 --timeout）
+minicpm-network-doctor --check-server
+
+# 3. 诊断
+minicpm-network-doctor "npm install 从 registry.npmjs.org 下载时超时"
+
+# 4. 用完停掉模型服务，释放显存/内存
+#    前台就是 Ctrl+C，或者用你自己的启停脚本
+```
+
+第 2 步值得每次都做：`--check-server` 会列出实际提供服务的模型，所以 `--alias` 写错、或者服务还在加载中，都能在三秒内看出来，而不是等一整轮超时。
+
+<details>
+<summary><b>如果你把模型服务交给 launchd / systemd 托管</b></summary>
+
+除非你希望模型长期常驻，否则把 `RunAtLoad` 和 `KeepAlive` 保持**关闭**——2B 的 Q4_K_M 加载不是免费的，常驻任务会让它跨重启一直占着。需要时再手动 start。
+
+另外，即使你没在用 Ollama，它也是内存莫名上涨的常见来源：某个请求带上 `keep_alive:-1` 就会把模型钉在内存里，直到显式卸载。发现内存异常时先看 `ollama ps`（或 `/api/ps`），用 `keep_alive:0` 卸载。
+
+</details>
+
 ### 1. 用 llama-server 启动 MiniCPM5-2B
 
 编译或安装 [llama.cpp](https://github.com/ggml-org/llama.cpp)，并下载 MiniCPM5-2B 的 GGUF。
-`--alias` 对应 CLI 的默认 `--model minicpm5-2b`，改了这个别名就要同步传 `--model`：
+`--alias` 对应 CLI 的默认 `--model minicpm5-2b`，改了这个别名就要同步传 `--model`。这条命令前台运行并
+持续驻留——单独开一个终端留着它，或者像上面那样交给 `launchd`/`systemd` 托管：
 
 ```bash
 llama-server \
