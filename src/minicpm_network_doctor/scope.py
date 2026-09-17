@@ -22,6 +22,10 @@ _SINGLE_LABEL_PORT_PATTERN = re.compile(
 )
 
 _UNTARGETED_TOOLS = frozenset({"inspect_proxy_environment", "system_network_context"})
+# Tools that may reach an already-reported host on an explicit address. The address is a
+# different resolution path for the reported host, never an additional target, so it must
+# be an IP literal and the host must still be reported.
+_ADDRESS_AWARE_TOOLS = frozenset({"test_tcp", "inspect_tls"})
 
 
 def normalize_host(host: str) -> str:
@@ -120,12 +124,38 @@ def _tool_target(name: str, arguments: dict[str, Any]) -> str | None:
     return None
 
 
+def _explicit_address_error(tool: str, value: Any) -> dict[str, Any] | None:
+    """Validate an optional explicit address used for a controlled comparison."""
+    if not isinstance(value, str) or not value.strip():
+        return {
+            "ok": False,
+            "error": "invalid_explicit_address",
+            "tool": tool,
+            "detail": "address must be a non-empty IP literal",
+        }
+    try:
+        normalized = normalize_host(value)
+        ipaddress.ip_address(normalized.split("%", 1)[0])
+    except (UnicodeError, ValueError):
+        return {
+            "ok": False,
+            "error": "invalid_explicit_address",
+            "tool": tool,
+            "detail": "address must be an IP literal, not a hostname",
+        }
+    return None
+
+
 def validate_tool_scope(
     name: str,
     arguments: dict[str, Any],
     allowed_hosts: Collection[str],
 ) -> dict[str, Any] | None:
     """Return a safe tool error when a model tries an unreported network target."""
+    if name in _ADDRESS_AWARE_TOOLS and "address" in arguments:
+        address_error = _explicit_address_error(name, arguments["address"])
+        if address_error is not None:
+            return address_error
     target = _tool_target(name, arguments)
     if target is None:
         if name in _UNTARGETED_TOOLS:

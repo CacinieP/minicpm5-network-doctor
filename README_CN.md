@@ -53,6 +53,8 @@ Evidence:
 - resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
   观察提示："proxy-managed DNS path; mapping alone does not establish a connectivity failure"
 - test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
+  观察提示："TCP success to a fake-IP address only proves that the local proxy accepted the
+  connection; it carries no information about the real upstream."
 
 Recommended action: 只为 registry.example.org 临时增加直连/绕过规则并重试一次，作为
 受控对照。回滚方式：删除这一条临时规则。
@@ -112,15 +114,16 @@ DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
 
 | 工具 | 用途 |
 |------|------|
-| `resolve_dns` | 解析一个主机名并报告 IPv4/IPv6 结果 |
-| `test_tcp` | 尝试连接指定主机和端口一次 |
+| `resolve_dns` | 解析一个主机名并报告 IPv4/IPv6 结果；带 `resolver="doh:cloudflare"`（或 `doh:google`、`doh:quad9`）时同时返回同一主机的系统解析结果 |
+| `test_tcp` | 尝试连接指定主机和端口一次；`address` 可连到指定 IP 做受控对照 |
 | `test_http` | 发送 HEAD，拦截跨主机跳转；遇到 405/501 时使用不读取正文的 Range GET |
-| `inspect_tls` | 验证 TLS 并概括对端证书 |
+| `inspect_tls` | 验证 TLS 并概括对端证书；`address` 连到指定 IP，但仍按被报告主机校验 SNI 与证书 |
 | `inspect_proxy_environment` | 读取环境及平台实际生效的代理并隐藏凭据 |
 | `inspect_hosts_file` | 检查一个报告主机是否被本地 hosts 文件覆盖 |
 | `system_network_context` | 报告操作系统信息和脱敏后的代理配置 |
 
-项目不提供任意命令执行或端口扫描工具。
+项目不提供任意命令执行或端口扫描工具。`address` 只把连接换到同一已报告主机的另一个 IP，
+且必须是 IP 字面量；被报告主机仍必须出现在原始报告中，因此对照不会扩大目标集合。
 
 ## Agent 行为
 
@@ -129,6 +132,10 @@ DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
 - **首轮强制取证。** 第一轮模型请求以 `tool_choice="required"` 发送，模型必须先调用一个诊断工具才能作答。如果后端拒绝 `required`，会自动退回 `auto` 重试；如果后端接受却无视要求，其无证据回答会被丢弃并再次要求取证。
 - **目标作用域强制执行。** 运行时从原始报告中提取主机、IP 和 URL；任何超出白名单的网络调用都会收到 `target_out_of_scope`，不会真正执行。
 - **工作量有界。** 每轮最多接受四次调用，整次诊断默认最多实际执行 12 次工具调用（最高可配置为 24）。
+- **不加新目标的受控对照。** `resolve_dns(resolver="doh:cloudflare")` 会在本地解析结果旁边
+  给出固定公共 DNS-over-HTTPS 解析器的答案；`test_tcp` 与 `inspect_tls` 可传入该主机的显式 IP。
+  作用域检查仍然要求主机出现在原始报告中，并拒绝 `address` 传主机名，因此对照不会变成对未报告
+  主机的探测。
 - **不收敛时优雅返回。** 如果模型连续三轮调用同一个工具仍未结束，或者用尽了轮次上限，运行时会停止并返回**结构化的部分诊断**——仍然输出四个段落，但 Diagnosis 段会注明模型未收敛，Evidence 段列出已收集的全部结果。因此 CLI 会以退出码 0 返回已收集的证据，而不是直接报错。硬性的 `StepLimitError`（退出码 1）仅保留给"未收集到任何证据"的罕见情况。
 
 ## 快速开始

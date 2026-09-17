@@ -2,6 +2,50 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## 0.5.0 — 2026-09-17
+
+### Added
+
+- `resolve_dns` accepts `resolver="doh:cloudflare"`, `"doh:google"`, or `"doh:quad9"`. The result
+  carries the public DNS-over-HTTPS answer for the host **next to** the system-resolver answer plus
+  a deterministic comparison observation, so a local DNS rewrite is visible in a single call. Plain
+  UDP/53 to a public resolver is typically hijacked in TUN mode; DoH is not, which is what makes it
+  a usable second path. Answers about another owner name, or unparsable data, are dropped instead of
+  reported.
+- `test_tcp` and `inspect_tls` accept an `address` argument: an IP literal for the reported host, so
+  a connection or handshake can be attempted against one explicit resolution path. `inspect_tls`
+  still uses the reported host for SNI and certificate validation. `scope.py` accepts `address`
+  only when the host itself was reported and rejects a hostname there, so a controlled comparison
+  cannot widen the target set.
+
+### Fixed
+
+- Fake-IP TCP semantics. `resolve_dns` and `test_tcp` now state that TCP success to a fake-IP
+  address only proves that the local proxy accepted the connection and carries no information about
+  the real upstream, and the system prompt no longer describes a successful TCP connection as
+  evidence that "the mapped path is reachable". `test_tcp` reports `peer_classification` and
+  attaches that note deterministically when the peer is a fake-IP address, instead of leaving the
+  caveat to the prompt alone.
+- The `cg nat` observation no longer claims the address "is typically injected"; it now says it is
+  typically assigned by an overlay such as Tailscale, or used as a proxy address pool. The existing
+  fake-IP wording test gained a sibling that locks the CG-NAT branch.
+
+### Documentation
+
+- New `docs/evidence/README.md` with the required-field checklist for evidence records (version and
+  source state, environment, model residency, complete invocation, backend parameters, per-check
+  outcome, waited time before any interruption, explicit non-claims).
+- `docs/evidence/2026-09-02-ollama-f16-smoke.md` gained an addendum naming the fields that were not
+  captured and therefore cannot be reconstructed, so its *Inconclusive* row is no longer citable as
+  evidence about model behaviour.
+
+### Verified
+
+- Locally on Python 3.14.7: 182 tests pass (was 105 at v0.4.0), 89.23% branch coverage, `ruff check`
+  and `ruff format --check` clean, `scripts/verify_metadata.py` passes for version 0.5.0. CI on the
+  release commit is the authoritative evidence per `docs/publishing.md` and had not run yet when
+  this entry was written.
+
 ## 0.4.0 — 2026-09-17
 
 ### Changed

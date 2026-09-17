@@ -56,6 +56,8 @@ Evidence:
 - resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
   observation: "proxy-managed DNS path; mapping alone does not establish a connectivity failure"
 - test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
+  observation: "TCP success to a fake-IP address only proves that the local proxy accepted the
+  connection; it carries no information about the real upstream."
 
 Recommended action: temporarily add only registry.example.org to the proxy's direct/bypass
 list and retry once as a controlled comparison. Roll back by removing that one rule.
@@ -118,15 +120,17 @@ configuration. Any OpenAI-compatible runtime that returns native `tool_calls` al
 
 | Tool | Purpose |
 |------|---------|
-| `resolve_dns` | Resolve one hostname and report IPv4/IPv6 results |
-| `test_tcp` | Attempt one connection to a specified host and port |
+| `resolve_dns` | Resolve one hostname and report IPv4/IPv6 results; with `resolver="doh:cloudflare"` (or `doh:google`, `doh:quad9`) also return the system-resolver answer for the same host |
+| `test_tcp` | Attempt one connection to a specified host and port; `address` connects to an explicit IP for a controlled comparison |
 | `test_http` | Send HEAD, block cross-host redirects, and use a bodyless ranged GET on 405/501 |
-| `inspect_tls` | Validate TLS and summarize the peer certificate |
+| `inspect_tls` | Validate TLS and summarize the peer certificate; `address` handshakes an explicit IP while checking the reported host's SNI and certificate |
 | `inspect_proxy_environment` | Read environment and platform-effective proxies, with credentials redacted |
 | `inspect_hosts_file` | Check one reported host for a local hosts-file override |
 | `system_network_context` | Report OS context and redacted proxy settings |
 
-There is no arbitrary command or port-scanning tool.
+There is no arbitrary command or port-scanning tool. `address` only moves the connection to
+another IP for the host that was already reported, and it must be an IP literal; the reported host
+still has to be in the original report, so the comparison cannot widen the target set.
 
 ## Agent Behavior
 
@@ -143,6 +147,11 @@ Four runtime controls keep the small model honest and resilient:
   executed.
 - **Bounded work.** At most four calls are accepted from one model turn and the diagnosis-wide
   execution budget defaults to 12 calls (configurable up to 24).
+- **Controlled comparison without new targets.** `resolve_dns(resolver="doh:cloudflare")` reports
+  what a fixed public DNS-over-HTTPS resolver answers next to the local answer, and
+  `test_tcp`/`inspect_tls` accept an explicit IP for the reported host. The scope check still
+  requires the reported host, and rejects a hostname in `address`, so a comparison cannot become
+  a scan of an unreported host.
 - **Graceful non-convergence.** If the model calls the same tool three turns in a
   row without finishing, or exhausts the turn budget, the runtime stops and
   returns a structured **partial diagnosis** — the four sections are still

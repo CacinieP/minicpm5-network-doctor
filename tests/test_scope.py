@@ -117,3 +117,45 @@ def test_extract_targets_accepts_terminal_dots_and_port_punctuation(query, expec
 )
 def test_extract_targets_terminal_dot_does_not_authorize_partial_hosts(query) -> None:
     assert extract_targets(query) == frozenset()
+
+
+def test_validate_tool_scope_allows_explicit_address_for_reported_host() -> None:
+    """A controlled comparison reaches the reported host on another resolution path."""
+    allowed = frozenset({"example.com"})
+
+    assert validate_tool_scope("test_tcp", {"host": "example.com", "port": 443}, allowed) is None
+    assert (
+        validate_tool_scope(
+            "inspect_tls", {"host": "example.com", "address": "93.184.216.34"}, allowed
+        )
+        is None
+    )
+    assert (
+        validate_tool_scope(
+            "test_tcp",
+            {"host": "example.com", "port": 443, "address": "198.18.0.190"},
+            allowed,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("address", ["other.example", "", "  ", "93.184.216.34/path"])
+def test_validate_tool_scope_rejects_a_hostname_or_invalid_address(address) -> None:
+    result = validate_tool_scope(
+        "inspect_tls", {"host": "example.com", "address": address}, frozenset({"example.com"})
+    )
+
+    assert result and result["error"] == "invalid_explicit_address"
+
+
+def test_validate_tool_scope_still_requires_the_reported_host() -> None:
+    allowed = frozenset({"example.com"})
+
+    unreported = validate_tool_scope(
+        "inspect_tls", {"host": "other.example", "address": "93.184.216.34"}, allowed
+    )
+    missing_host = validate_tool_scope("inspect_tls", {"address": "93.184.216.34"}, allowed)
+
+    assert unreported and unreported["error"] == "target_out_of_scope"
+    assert missing_host and missing_host["error"] == "target_missing_or_invalid"

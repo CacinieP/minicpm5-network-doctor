@@ -35,6 +35,22 @@ def test_system_prompt_requires_corroboration_for_fake_ip() -> None:
     assert "strong evidence of dns hijacking" not in prompt
 
 
+def test_system_prompt_limits_what_tcp_success_to_a_fake_ip_proves() -> None:
+    prompt = load_system_prompt()
+
+    assert "only proves that the local proxy accepted" in prompt
+    assert "no information about the real upstream" in prompt
+    assert "mapped path is reachable" not in prompt
+
+
+def test_system_prompt_offers_the_read_only_controlled_comparison_tools() -> None:
+    prompt = load_system_prompt()
+
+    assert 'resolver="doh:cloudflare"' in prompt
+    assert "inspect_tls" in prompt and "address" in prompt
+    assert "Controlled comparison" in prompt
+
+
 def _tool_call(name: str, arguments: dict, call_id: str = "call-1") -> SimpleNamespace:
     return SimpleNamespace(
         id=call_id,

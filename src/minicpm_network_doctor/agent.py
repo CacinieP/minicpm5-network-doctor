@@ -13,6 +13,7 @@ from .tools import execute_tool, openai_tools, tool_result_json
 _REQUIRED_SECTIONS = ("Diagnosis:", "Evidence:", "Recommended action:", "Verification:")
 _NON_EVIDENCE_ERRORS = {
     "duplicate_tool_call",
+    "invalid_explicit_address",
     "target_missing_or_invalid",
     "target_out_of_scope",
     "tool_call_limit_exceeded",
