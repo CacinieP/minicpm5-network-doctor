@@ -3,14 +3,14 @@
 </p>
 
 <p align="center">
-  让一个 10 亿参数的小模型 + 七个只读工具，在你自己的机器上调查异常 DNS 映射、端口不通、
+  让一个 20 亿参数的小模型 + 七个只读工具，在你自己的机器上调查异常 DNS 映射、端口不通、
   证书错误等网络问题。
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/CacinieP/minicpm5-network-doctor/ci.yml?branch=main&style=flat-square" alt="CI">
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
-  <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
+  <img src="https://img.shields.io/badge/MiniCPM5-2B-blue" alt="MiniCPM5-2B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/tests-offline%20suite-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-minimum%2085%25-success" alt="Coverage">
@@ -31,7 +31,7 @@
 ---
 
 MiniCPM Network Doctor 将本地运行的
-[MiniCPM5-1B](https://github.com/OpenBMB/MiniCPM) 模型与一组精简的只读网络工具结合起来。
+[MiniCPM5-2B](https://github.com/OpenBMB/MiniCPM) 模型与一组精简的只读网络工具结合起来。
 模型判断应该执行哪项检查；确定性的 Python 代码负责检查并返回证据。
 
 项目刻意保持聚焦：在不给模型任意 Shell 权限的前提下，诊断开发者遇到的 DNS、TCP、
@@ -94,7 +94,7 @@ Evidence 段中的数值全部由只读工具产生并原样呈现。模型的�
 开发者症状或错误
        │
        ▼
-通过 SGLang 运行 MiniCPM5-1B
+通过 llama-server 运行 MiniCPM5-2B
        │ OpenAI 兼容 tool_calls
        ▼
 白名单 Python 工具
@@ -104,8 +104,9 @@ DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
 证据 → 诊断 → 一个可逆建议 → 验证
 ```
 
-推荐使用 SGLang 作为后端，因为 MiniCPM5 官方的 `minicpm5` 解析器可以把模型生成的
-XML 风格调用转换为标准 OpenAI 兼容 `tool_calls`。
+`llama-server`（llama.cpp）是参考后端：它直接使用 MiniCPM5 的聊天模板，模型产出的工具调用
+本身就是原生 OpenAI 兼容 `tool_calls`，不需要额外配置解析器。任何能返回原生 `tool_calls`
+的 OpenAI 兼容运行时也都可以接入。
 
 ## 只读工具
 
@@ -136,53 +137,56 @@ XML 风格调用转换为标准 OpenAI 兼容 `tool_calls`。
 
 这是一个独立的社区项目，与 OpenBMB 不存在隶属关系，也未获得其官方背书。
 
-### 1. 启动支持工具调用解析的 MiniCPM5
+### 1. 用 llama-server 启动 MiniCPM5-2B
 
-MiniCPM 官方部署 Skill 当前建议从 `main` 安装 SGLang，以获得 MiniCPM5 解析器：
+编译或安装 [llama.cpp](https://github.com/ggml-org/llama.cpp)，并下载 MiniCPM5-2B 的 GGUF。
+`--alias` 对应 CLI 的默认 `--model minicpm5-2b`，改了这个别名就要同步传 `--model`：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+llama-server \
+  -m ~/models/MiniCPM5-2B-Q4_K_M.gguf \
+  --alias minicpm5-2b \
+  --host 127.0.0.1 \
+  --port 8080 \
+  -ngl 99 \
+  -c 65536 \
+  -ctk q8_0 -ctv q8_0 \
+  --parallel 1
+```
+
+OpenAI 兼容端点是 `http://127.0.0.1:8080/v1`，也就是 CLI 的默认值。在 macOS 上可以用一个
+`.command` 菜单脚本包住这行命令，把启动/停止/看日志从诊断流程里剥出去；已验证的启动配置和
+请求行为见 [llama.cpp 实测记录](docs/evidence/2026-09-17-llama-cpp-2b.md)。
+
+<details>
+<summary><b>替代后端：SGLang（Linux / NVIDIA GPU）</b></summary>
+
+在 NVIDIA GPU 上，可以用 SGLang 通过 MiniCPM5 官方 `minicpm5` 解析器提供全精度权重：
+
+```bash
 pip install "git+https://github.com/sgl-project/sglang.git@main#subdirectory=python"
 
 python -m sglang.launch_server \
-  --model-path openbmb/MiniCPM5-1B \
-  --served-model-name openbmb/MiniCPM5-1B \
+  --model-path openbmb/MiniCPM5-2B \
+  --served-model-name openbmb/MiniCPM5-2B \
   --port 30000 \
   --tool-call-parser minicpm5
-```
-
-这条 SGLang 路线面向 NVIDIA GPU 环境。其他 OpenAI 兼容运行时也可以接入，但需要把
-MiniCPM5 调用作为原生 `tool_calls` 返回。
-
-<details>
-<summary><b>替代后端：Ollama（macOS / 无 NVIDIA GPU）</b></summary>
-
-SGLang 只发布 Linux wheel，因此在 macOS（Apple Silicon）或任何没有 NVIDIA GPU 的机器上，
-可以使用 [Ollama](https://ollama.com) 来提供同样的模型并暴露 OpenAI 兼容接口。工具调用依赖
-`minicpm5` 聊天模板；建议使用 F16 GGUF 以获得稳定的工具调用。
-
-```bash
-# 拉取 F16 GGUF（推荐，工具调用最稳定）
-ollama pull hf.co/openbmb/MiniCPM5-1B-GGUF:F16
-
-# OpenAI 兼容端点为 http://127.0.0.1:11434/v1
 ```
 
 然后把 Network Doctor 指向它：
 
 ```bash
 minicpm-network-doctor \
-  --base-url http://127.0.0.1:11434/v1 \
-  --api-key ollama \
-  --model hf.co/openbmb/MiniCPM5-1B-GGUF:F16 \
+  --base-url http://127.0.0.1:30000/v1 \
+  --model openbmb/MiniCPM5-2B \
   "npm install 从 registry.npmjs.org 下载时超时"
 ```
 
-> **Ollama 量化提示：** 高度量化的版本（如 `Q4_K_M`）虽然能产生工具调用，但可能不稳定。
-> 诊断循环推荐使用 `F16`。
-
 </details>
+
+> **量化提示：** `Q4_K_M` + llama-server b10150 是已验证的参考配置，实测能稳定产出工具调用
+> 和完整的四段诊断。比这一档更低的高度量化版本仍然更容易跑偏或被截断；如果工具调用开始
+> 消失，先提高量化档位，再考虑动运行参数。
 
 ### 2. 安装 Network Doctor
 
@@ -209,6 +213,18 @@ minicpm-network-doctor --thinking \
   "浏览器能访问 registry.npmjs.org，但包管理器报告证书错误"
 ```
 
+`--thinking` 会连带改变三个默认值——2B 的思维链开销远高于普通轮次：
+
+| | 默认值 | 原因 |
+|---|---|---|
+| `--max-tokens` | `2048` → `8192` | 实测思维链长度为 1.1k–25.5k 字符，2048 会被 `finish_reason=length` 从思考中途截断 |
+| `--timeout` | `180` → `600` | 满预算的思考轮次经常超过 180 秒 |
+| `temperature` | `0.4` → `0.6` | 思考阶段需要一点探索空间 |
+
+也可以直接覆盖，例如 `--thinking --max-tokens 4096 --timeout 300`。如果思考轮次仍然装不下，
+运行时会返回携带已收集证据的部分诊断而不是失败，并在 `warnings` 里报告
+`model_response_truncated_by_budget`。
+
 以 JSON 输出完整工具轨迹：
 
 ```bash
@@ -222,7 +238,7 @@ minicpm-network-doctor --check-server
 minicpm-network-doctor --progress "检查 https://example.com 的 TLS 错误"
 ```
 
-Ollama 一类运行在 `127.0.0.1` 的回环端点默认直连，避免桌面代理截获模型请求；远程端点仍会
+本地 `llama-server` 一类运行在 `127.0.0.1` 的回环端点默认直连，避免桌面代理截获模型请求；远程端点仍会
 沿用代理设置。可用 `--use-model-proxy` 或 `--no-model-proxy` 覆盖自动判断。模型 API 默认不
 重试，以免本地慢请求成倍等待；远程端点确有需要时再设置 `--max-retries`。
 
@@ -233,8 +249,8 @@ Ollama 一类运行在 `127.0.0.1` 的回环端点默认直连，避免桌面代
 
 | 环境变量 | 默认值 |
 |----------|--------|
-| `MINICPM_BASE_URL` | `http://127.0.0.1:30000/v1` |
-| `MINICPM_MODEL` | `openbmb/MiniCPM5-1B` |
+| `MINICPM_BASE_URL` | `http://127.0.0.1:8080/v1` |
+| `MINICPM_MODEL` | `minicpm5-2b` |
 | `MINICPM_API_KEY` | `not-needed` |
 
 也可以通过对应的 CLI 参数配置：
@@ -281,15 +297,17 @@ cp -R skills/minicpm-network-doctor ~/.codex/skills/
 
 ## 已知局限
 
-MiniCPM5-1B 是一个 10 亿参数的小模型。运行时添加了多重防护来弥补，但部分失败模式属于模型
+MiniCPM5-2B 是一个 20 亿参数的小模型。运行时添加了多重防护来弥补，但部分失败模式属于模型
 固有缺陷，无法在代码层面彻底解决：
 
 - **工具调用并非总可靠。** 部分后端（尤其是 Ollama）会接受 `tool_choice="required"` 却偶发返回
   纯文本。运行时会拒绝这种无证据回答并重试；如果后端持续不兼容，最终会明确报出“没有工具证据”，
   而不是给出猜测式诊断。
-- **量化会降低工具调用稳定性。** 高度量化的 GGUF（`Q4_K_M`）会生成更长的思维链，更容易漂移或
-  被截断，不如 `F16` 稳定。诊断循环推荐使用 `F16`。`--thinking` 对疑难场景有帮助，但也会把更多
-  token 预算花在推理上，本身也可能截断答案。
+- **思考可能耗尽自身预算。** `--thinking` 模式下模型会把大部分 `--max-tokens` 花在思维链上，
+  有可能在产出工具调用或答案之前就被 `finish_reason=length` 截断。llama.cpp 会把这段被截断的
+  文本放进 `reasoning_content`，导致 `content` 与 `tool_calls` 同时为空；运行时此时按“未收敛”
+  处理，返回带已收集证据的部分诊断，而不是把证据丢掉。看到
+  `model_response_truncated_by_budget` 就调大 `--max-tokens`。
 - **fake-IP 映射不是根因。** 它只说明 DNS 处于代理管理路径，该路径也可能完全正常。没有受控的
   直连/绕过对照时，Agent 必须把代理是否导致故障标记为未确认。
 - **无写权限。** Agent 只做观察，不能刷新 DNS、切换代理、重启服务或应用任何修复。给出的建议都
@@ -301,9 +319,10 @@ MiniCPM5-1B 是一个 10 亿参数的小模型。运行时添加了多重防护�
 - **服务端随机性。** 同一温度下，不同运行的诊断质量会有波动。若某次运行停滞，运行时会返回
   结构化的部分诊断（见 [Agent 行为](#agent-行为)），已收集的证据不会丢失；可用 `--thinking`
   重试或提供更具体的症状以获得更精准的结果。
-- **后端差异。** SGLang（Linux / NVIDIA GPU）是参考后端。当前 Ollama 可识别 OpenAI 兼容的
-  `reasoning_effort`，SGLang 使用 `chat_template_kwargs.enable_thinking`；旧版或其他运行时仍可能
-  忽略其中一个或全部控制字段。
+- **后端差异。** llama-server（llama.cpp）是参考后端，同时识别
+  `chat_template_kwargs.enable_thinking` 和 OpenAI 兼容的 `reasoning_effort` 字段。SGLang 使用
+  `chat_template_kwargs.enable_thinking`；旧版或其他运行时仍可能忽略其中一个或全部控制字段，
+  运行时会在字段被拒绝后去掉它重试。
 
 当模型表现不稳定时，最有效的升级是换用更强的模型（例如 MiniCPM5 4B/8B）并搭配能可靠解析
 工具调用的后端，而非继续增加循环层面的防护。
@@ -349,7 +368,8 @@ CI 还检查依赖漏洞，并在仓库外的独立环境中分别安装、验�
 
 ## 致谢
 
-- [OpenBMB/MiniCPM](https://github.com/OpenBMB/MiniCPM)：MiniCPM5-1B 及其工具调用部署指南。
+- [OpenBMB/MiniCPM](https://github.com/OpenBMB/MiniCPM)：MiniCPM5-2B 及其工具调用部署指南。
+- [llama.cpp](https://github.com/ggml-org/llama.cpp)：提供参考端点的 `llama-server` 运行时。
 - [CacinieP/network-troubleshoot-skill](https://github.com/CacinieP/network-troubleshoot-skill)：
   本项目所采用的“先证据、后诊断”网络排障工作流来源。
 

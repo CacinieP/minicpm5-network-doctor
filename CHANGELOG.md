@@ -2,6 +2,44 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## 0.4.0 — 2026-09-17
+
+### Changed
+
+- Switch the reference backend from SGLang to `llama-server` (llama.cpp). `MINICPM_BASE_URL`
+  now defaults to `http://127.0.0.1:8080/v1` and `MINICPM_MODEL` to `minicpm5-2b`, matching the
+  verified launch configuration; `agent.py` no longer hardcodes the old `openbmb/MiniCPM5-1B` name.
+- Move MiniCPM5 to the 2B weights. `Q4_K_M` on llama-server b10150 is now the verified reference
+  quantization, replacing the previous "prefer F16" guidance.
+- Raise the completion budget from 1024 to 2048, and to 8192 under `--thinking`.
+- `--thinking` also raises the default request timeout from 180s to 600s, since a full-budget
+  thinking turn routinely exceeds it.
+
+### Added
+
+- `--max-tokens` to set the completion budget directly (256-32768), overriding the
+  thinking-dependent defaults. Thinking variance measured 1.1k-25.5k characters of chain-of-thought
+  on the reference model, so no single fixed value is safe.
+- A `model_response_truncated_by_budget` warning and a llama.cpp evidence record
+  ([docs/evidence/2026-09-17-llama-cpp-2b.md](docs/evidence/2026-09-17-llama-cpp-2b.md)).
+
+### Fixed
+
+- A model turn cut off by `finish_reason=length` no longer aborts the diagnosis. llama.cpp reports
+  the cut-off chain of thought in `reasoning_content`, leaving both `content` and `tool_calls`
+  empty; the agent treated that as a fatal "neither text nor tool calls" error and discarded every
+  tool result collected so far. It now reports `model_response_truncated_by_budget` and returns the
+  structured partial diagnosis with the evidence intact. A truncated *first* turn still raises
+  `StepLimitError`, because there is no evidence to preserve.
+
+### Verified
+
+- On llama-server b10150 with MiniCPM5-2B `Q4_K_M`: `tool_choice="required"`,
+  `chat_template_kwargs.enable_thinking`, and `reasoning_effort` are all accepted (HTTP 200), so
+  none of the compatibility fallbacks fire. `--check-server` reports model id `minicpm5-2b`.
+- A non-thinking diagnosis of an npm registry timeout returned all four required sections with
+  correct fake-IP classification.
+
 ## 0.3.2 — 2026-09-06
 
 ### Fixed

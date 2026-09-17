@@ -28,8 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("MINICPM_BASE_URL", "http://127.0.0.1:30000/v1"),
-        help="OpenAI-compatible MiniCPM endpoint.",
+        default=os.environ.get("MINICPM_BASE_URL", "http://127.0.0.1:8080/v1"),
+        help="OpenAI-compatible MiniCPM endpoint (llama-server default port 8080).",
     )
     parser.add_argument(
         "--api-key",
@@ -38,8 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default=os.environ.get("MINICPM_MODEL", "openbmb/MiniCPM5-1B"),
-        help="Served model name.",
+        default=os.environ.get("MINICPM_MODEL", "minicpm5-2b"),
+        help="Served model name (matches the llama-server --alias).",
     )
     parser.add_argument("--max-steps", type=int, default=6, help="Maximum model turns (1-12).")
     parser.add_argument(
@@ -49,10 +49,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum executed tool calls across the diagnosis (1-24).",
     )
     parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Completion token budget (256-32768). Defaults to 8192 with --thinking, "
+        "2048 without: MiniCPM5-2B thinking chains need room before it answers.",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
-        default=180.0,
-        help="Model API timeout in seconds. Each turn can take ~50s on slower runtimes.",
+        default=None,
+        help="Model API timeout in seconds (1-600). Defaults to 180, or 600 with "
+        "--thinking, whose larger token budget makes each turn several times slower.",
     )
     parser.add_argument(
         "--max-retries",
@@ -313,8 +321,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if not 1 <= args.max_steps <= 12:
         parser.error("--max-steps must be between 1 and 12")
+    if args.max_tokens is not None and not 256 <= args.max_tokens <= 32768:
+        parser.error("--max-tokens must be between 256 and 32768")
     if not 1 <= args.max_tool_calls <= 24:
         parser.error("--max-tool-calls must be between 1 and 24")
+    if args.timeout is None:
+        # Thinking turns on a 2B model routinely exceed 180s once the budget is large.
+        args.timeout = 600.0 if args.thinking else 180.0
     if not 1 <= args.timeout <= 600:
         parser.error("--timeout must be between 1 and 600 seconds")
     if not 0 <= args.max_retries <= 5:
@@ -361,6 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=args.model,
             max_steps=args.max_steps,
             max_tool_calls=args.max_tool_calls,
+            max_tokens=args.max_tokens,
             thinking=args.thinking,
             on_tool_event=_print_progress if args.progress else None,
         )

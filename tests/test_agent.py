@@ -42,8 +42,17 @@ def _tool_call(name: str, arguments: dict, call_id: str = "call-1") -> SimpleNam
     )
 
 
-def _response(*, content: str | None = None, tool_calls=None) -> SimpleNamespace:
-    message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
+def _response(
+    *,
+    content: str | None = None,
+    tool_calls=None,
+    reasoning_content: str | None = None,
+) -> SimpleNamespace:
+    message = SimpleNamespace(
+        content=content,
+        tool_calls=tool_calls or [],
+        reasoning_content=reasoning_content,
+    )
     return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
@@ -359,3 +368,114 @@ def test_result_json_has_stable_envelope(monkeypatch) -> None:
     assert payload["status"] == "complete"
     assert payload["targets"] == ["example.com"]
     assert payload["warnings"] == ["model_answer_missing_required_sections"]
+
+
+def test_thinking_mode_gets_a_larger_token_budget(monkeypatch) -> None:
+    """MiniCPM5-2B thinking chains ran 1.1k-25.5k characters on llama-server.
+
+    At 2048 the model exhausts the budget on reasoning_content, is cut off by
+    finish_reason=length, and never emits a tool call or an answer.
+    """
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"})]),
+            _response(content="Diagnosis: ok.\nEvidence:\nRecommended action:\nVerification:"),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True, "host": arguments["host"]},
+    )
+    NetworkDoctor(fake, thinking=True, system_prompt="test prompt").diagnose("Check example.com")
+
+    assert fake.fake_completions.requests[0]["max_tokens"] == 8192
+
+
+def test_plain_mode_keeps_a_smaller_token_budget(monkeypatch) -> None:
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"})]),
+            _response(content="Diagnosis: ok.\nEvidence:\nRecommended action:\nVerification:"),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True, "host": arguments["host"]},
+    )
+    NetworkDoctor(fake, system_prompt="test prompt").diagnose("Check example.com")
+
+    assert fake.fake_completions.requests[0]["max_tokens"] == 2048
+
+
+def test_explicit_max_tokens_overrides_the_thinking_default(monkeypatch) -> None:
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"})]),
+            _response(content="Diagnosis: ok.\nEvidence:\nRecommended action:\nVerification:"),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True, "host": arguments["host"]},
+    )
+    NetworkDoctor(fake, thinking=True, max_tokens=4096, system_prompt="test prompt").diagnose(
+        "Check example.com"
+    )
+
+    assert fake.fake_completions.requests[0]["max_tokens"] == 4096
+
+
+def test_max_tokens_rejects_out_of_range_values() -> None:
+    doctor = NetworkDoctor(_client([]), system_prompt="test prompt")
+
+    with pytest.raises(ValueError, match="max_tokens"):
+        doctor.__class__(doctor.client, system_prompt="test prompt", max_tokens=8)
+    with pytest.raises(ValueError, match="max_tokens"):
+        doctor.__class__(doctor.client, system_prompt="test prompt", max_tokens=99_999)
+
+
+def test_truncated_thinking_turn_keeps_evidence_as_partial(monkeypatch) -> None:
+    """A turn cut off by finish_reason=length must not discard collected evidence.
+
+    On llama.cpp the model writes its chain of thought to reasoning_content and can
+    spend the whole budget there, leaving both content and tool_calls empty. Raising
+    would throw away every tool result gathered so far.
+    """
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"})]),
+            _response(content=None, tool_calls=[], reasoning_content="counting " * 400),
+        ]
+    )
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True, "host": arguments["host"]},
+    )
+
+    result = NetworkDoctor(fake, max_steps=4, system_prompt="test prompt").diagnose(
+        "Check example.com"
+    )
+
+    assert result.status == "partial"
+    assert "model_response_truncated_by_budget" in result.warnings
+    assert result.tool_events[0].name == "resolve_dns"
+    assert "resolve_dns" in result.text
+
+
+def test_truncated_first_turn_still_reports_missing_evidence(monkeypatch) -> None:
+    """With no evidence yet, a truncated turn must not fabricate a partial diagnosis."""
+    fake = _client([_response(content=None, tool_calls=[], reasoning_content="thinking")])
+    monkeypatch.setattr("minicpm_network_doctor.agent.execute_tool", lambda *a, **k: {"ok": True})
+
+    with pytest.raises(StepLimitError, match="no usable tool evidence"):
+        NetworkDoctor(fake, max_steps=3, system_prompt="test prompt").diagnose("Check example.com")
+
+
+def test_empty_response_without_reasoning_is_still_an_error(monkeypatch) -> None:
+    fake = _client([_response(content=None, tool_calls=[])])
+
+    with pytest.raises(NetworkDoctorError, match="neither text nor tool calls"):
+        NetworkDoctor(fake, max_steps=2, system_prompt="test prompt").diagnose("Check example.com")
