@@ -159,11 +159,58 @@ Four runtime controls keep the small model honest and resilient:
 
 This is an independent community project and is not affiliated with or endorsed by OpenBMB.
 
+### How to use it
+
+Two processes, started separately:
+
+| | What starts it | When |
+|---|---|---|
+| **Model server** (`llama-server`) | you do | before diagnosing; stays up |
+| **Network Doctor** (`minicpm-network-doctor`) | you do | once per diagnosis |
+
+**Network Doctor never starts, stops, or manages the model server.** It is only an OpenAI-compatible
+client. If the endpoint is down it fails fast instead of loading anything itself.
+
+The everyday loop:
+
+```bash
+# 1. Start the model server (separate terminal, or a background service)
+llama-server -m ~/models/MiniCPM5-2B-Q4_K_M.gguf --alias minicpm5-2b --port 8080 -ngl 99 -c 65536
+
+# 2. Confirm it answers (fast, 2.5s timeout; fails immediately rather than waiting out --timeout)
+minicpm-network-doctor --check-server
+
+# 3. Diagnose
+minicpm-network-doctor "npm install times out fetching registry.npmjs.org"
+
+# 4. Stop the model server when done to release GPU/memory
+#    Ctrl+C in its terminal, or your own start/stop wrapper
+```
+
+Step 2 is worth running first: `--check-server` reports the served model list, so a mismatched
+`--alias` or a server still loading surfaces in under three seconds instead of after a full turn
+times out.
+
+<details>
+<summary><b>If you hand the model server to launchd / systemd</b></summary>
+
+Keep `RunAtLoad` and `KeepAlive` **off** unless you want the model resident permanently — a
+2B Q4_K_M load is not free, and an always-on job holds it across reboots. Load the unit and start it
+manually when you need it.
+
+Separately, Ollama is a common source of unexplained memory use even when you are not using it: a
+request sent with `keep_alive:-1` pins a model in memory until it is explicitly unloaded. Check
+`ollama ps` (or `/api/ps`) if memory climbs with no obvious process, and unload with
+`keep_alive:0`.
+
+</details>
+
 ### 1. Serve MiniCPM5-2B with llama-server
 
 Build or install [llama.cpp](https://github.com/ggml-org/llama.cpp) and download a MiniCPM5-2B
 GGUF. The `--alias` is what the CLI's default `--model minicpm5-2b` matches, so keep it unless you
-also pass a different `--model`:
+also pass a different `--model`. This runs in the foreground and stays up — leave it in its own
+terminal, or hand it to `launchd`/`systemd` as described above:
 
 ```bash
 llama-server \
