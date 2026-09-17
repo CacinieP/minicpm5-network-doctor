@@ -42,9 +42,15 @@ All notable changes are documented here. The project follows semantic versioning
 ### Verified
 
 - Locally on Python 3.14.7: 182 tests pass (was 105 at v0.4.0), 89.23% branch coverage, `ruff check`
-  and `ruff format --check` clean, `scripts/verify_metadata.py` passes for version 0.5.0. CI on the
-  release commit is the authoritative evidence per `docs/publishing.md` and had not run yet when
-  this entry was written.
+  and `ruff format --check` clean, `scripts/verify_metadata.py` passes for version 0.5.0.
+- On a real Clash/Mihomo TUN fake-ip stack (`docs/evidence/2026-09-17-doh-comparison.md`): the
+  system resolver returned `198.18.0.6` for `example.com` while `resolver="doh:cloudflare"` returned
+  public Cloudflare addresses in the same call; `test_tcp` accepted the fake-IP peer in 6.5 ms with
+  the caveat attached, `test_tcp(address=...)` reached the DoH-reported address in 8.1 ms, and
+  `inspect_tls(address=...)` completed a TLSv1.3 handshake whose certificate is issued to
+  `example.com`. One run per check, so no stability or accuracy claim.
+- CI on the release commit is the authoritative evidence per `docs/publishing.md` and had not run
+  yet when this entry was written.
 
 ## 0.4.0 — 2026-09-17
 
