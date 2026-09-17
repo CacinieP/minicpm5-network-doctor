@@ -364,3 +364,67 @@ def test_print_progress_formats_success_and_failure(capsys) -> None:
 def test_cli_rejects_out_of_range_limits(args) -> None:
     with pytest.raises(SystemExit):
         main(args)
+
+
+def _capture_doctor_kwargs(monkeypatch, argv):
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured["client"] = kwargs
+
+    class FakeDoctor:
+        def __init__(self, client, **kwargs):  # noqa: ARG002
+            captured["doctor"] = kwargs
+
+        def diagnose(self, prompt):  # noqa: ARG002
+            captured["prompt"] = prompt
+            return DiagnosisResult(text="Done.", model_turns=1, tool_events=(), targets=())
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    monkeypatch.setattr("minicpm_network_doctor.cli.NetworkDoctor", FakeDoctor)
+    assert main(argv) == 0
+    return captured
+
+
+def test_thinking_raises_the_default_timeout(monkeypatch) -> None:
+    """A large thinking budget makes each turn several times slower than 180s."""
+    captured = _capture_doctor_kwargs(
+        monkeypatch, ["--skip-server-check", "--thinking", "example.com"]
+    )
+
+    assert captured["client"]["timeout"] == 600.0
+    assert captured["doctor"]["max_tokens"] is None
+
+
+def test_plain_mode_keeps_the_default_timeout(monkeypatch) -> None:
+    captured = _capture_doctor_kwargs(monkeypatch, ["--skip-server-check", "example.com"])
+
+    assert captured["client"]["timeout"] == 180.0
+
+
+def test_explicit_timeout_and_max_tokens_win_over_defaults(monkeypatch) -> None:
+    captured = _capture_doctor_kwargs(
+        monkeypatch,
+        [
+            "--skip-server-check",
+            "--thinking",
+            "--timeout",
+            "60",
+            "--max-tokens",
+            "4096",
+            "example.com",
+        ],
+    )
+
+    assert captured["client"]["timeout"] == 60
+    assert captured["doctor"]["max_tokens"] == 4096
+
+
+def test_max_tokens_rejects_out_of_range_values(monkeypatch) -> None:
+    parser = build_parser()
+
+    for value in ("8", "999999"):
+        with pytest.raises(SystemExit):
+            main(["--max-tokens", value, "example.com"])
+    assert parser is not None

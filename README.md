@@ -3,14 +3,14 @@
 </p>
 
 <p align="center">
-  Investigate unexpected DNS mappings, dead ports, and broken TLS with a 1B model and seven
+  Investigate unexpected DNS mappings, dead ports, and broken TLS with a 2B model and seven
   read-only tools, all running on your own machine.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/CacinieP/minicpm5-network-doctor/ci.yml?branch=main&style=flat-square" alt="CI">
   <img src="https://img.shields.io/github/v/release/CacinieP/minicpm5-network-doctor?style=flat-square&color=blue" alt="Release">
-  <img src="https://img.shields.io/badge/MiniCPM5-1B-blue" alt="MiniCPM5-1B">
+  <img src="https://img.shields.io/badge/MiniCPM5-2B-blue" alt="MiniCPM5-2B">
   <img src="https://img.shields.io/badge/Python-3.10%2B-green" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/tests-offline%20suite-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-minimum%2085%25-success" alt="Coverage">
@@ -31,7 +31,7 @@
 ---
 
 MiniCPM Network Doctor combines a locally served
-[MiniCPM5-1B](https://github.com/OpenBMB/MiniCPM) model with a small set of read-only network
+[MiniCPM5-2B](https://github.com/OpenBMB/MiniCPM) model with a small set of read-only network
 tools. The model decides which check is useful; deterministic Python code performs the check and
 returns evidence.
 
@@ -100,7 +100,7 @@ unsupported root-cause claim. For the full tool trace, pass `--json`.
 Developer symptom or error
           │
           ▼
- MiniCPM5-1B via SGLang
+ MiniCPM5-2B via llama-server
           │ OpenAI-compatible tool_calls
           ▼
   Allowlisted Python tools
@@ -110,8 +110,9 @@ Developer symptom or error
  Evidence → diagnosis → one reversible recommendation → verification
 ```
 
-SGLang is the recommended backend because MiniCPM5's official `minicpm5` parser converts the
-model's XML-style calls into standard OpenAI-compatible `tool_calls`.
+`llama-server` (llama.cpp) is the reference backend: it serves MiniCPM5's chat template directly,
+so the model's tool calls arrive as native OpenAI-compatible `tool_calls` with no parser
+configuration. Any OpenAI-compatible runtime that returns native `tool_calls` also works.
 
 ## Read-Only Tools
 
@@ -158,59 +159,60 @@ Four runtime controls keep the small model honest and resilient:
 
 This is an independent community project and is not affiliated with or endorsed by OpenBMB.
 
-### 1. Serve MiniCPM5 with tool-call parsing
+### 1. Serve MiniCPM5-2B with llama-server
 
-The official MiniCPM deployment skill currently recommends installing SGLang from `main` for the
-MiniCPM5 parser:
+Build or install [llama.cpp](https://github.com/ggml-org/llama.cpp) and download a MiniCPM5-2B
+GGUF. The `--alias` is what the CLI's default `--model minicpm5-2b` matches, so keep it unless you
+also pass a different `--model`:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+llama-server \
+  -m ~/models/MiniCPM5-2B-Q4_K_M.gguf \
+  --alias minicpm5-2b \
+  --host 127.0.0.1 \
+  --port 8080 \
+  -ngl 99 \
+  -c 65536 \
+  -ctk q8_0 -ctv q8_0 \
+  --parallel 1
+```
+
+The OpenAI-compatible endpoint is then `http://127.0.0.1:8080/v1`, which is what the CLI defaults
+to. On macOS, a `.command` menu wrapper around this invocation keeps start/stop/log handling out
+of the diagnosis loop; see [llama.cpp evidence](docs/evidence/2026-09-17-llama-cpp-2b.md) for the
+verified launch configuration and measured request behavior.
+
+<details>
+<summary><b>Alternative backend: SGLang (Linux / NVIDIA GPU)</b></summary>
+
+On an NVIDIA GPU, SGLang serves the full-precision weights through MiniCPM5's official
+`minicpm5` parser:
+
+```bash
 pip install "git+https://github.com/sgl-project/sglang.git@main#subdirectory=python"
 
 python -m sglang.launch_server \
-  --model-path openbmb/MiniCPM5-1B \
-  --served-model-name openbmb/MiniCPM5-1B \
+  --model-path openbmb/MiniCPM5-2B \
+  --served-model-name openbmb/MiniCPM5-2B \
   --port 30000 \
   --tool-call-parser minicpm5
 ```
 
-This SGLang path targets an NVIDIA GPU environment. Other OpenAI-compatible runtimes can be used
-when they return MiniCPM5 calls as native `tool_calls`.
-
-<details>
-<summary><b>Alternative backend: Ollama (macOS / no NVIDIA GPU)</b></summary>
-
-SGLang only ships Linux wheels, so on macOS (Apple Silicon) or any machine without an NVIDIA GPU,
-use [Ollama](https://ollama.com) to serve the same model with an OpenAI-compatible endpoint.
-Tool calling works with the `minicpm5` chat template; the F16 GGUF is recommended for reliable
-tool-call generation.
-
-```bash
-# Pull the F16 GGUF (recommended for stable tool calls)
-ollama pull hf.co/openbmb/MiniCPM5-1B-GGUF:F16
-
-# The OpenAI-compatible endpoint is on http://127.0.0.1:11434/v1
-```
-
-Then point Network Doctor at it:
+Point Network Doctor at it:
 
 ```bash
 minicpm-network-doctor \
-  --base-url http://127.0.0.1:11434/v1 \
-  --api-key ollama \
-  --model hf.co/openbmb/MiniCPM5-1B-GGUF:F16 \
+  --base-url http://127.0.0.1:30000/v1 \
+  --model openbmb/MiniCPM5-2B \
   "npm install times out fetching registry.npmjs.org"
 ```
 
-> **Quantization note for Ollama:** heavily quantized variants (e.g. `Q4_K_M`) can still produce
-> tool calls but may drift. Prefer `F16` for the most reliable diagnosis loop.
-
 </details>
 
-> **Quantization note:** use the full-precision / `F16` (or `bf16`) weights. Heavily quantized
-> variants (e.g. `Q4_K_M`) tend to emit long chain-of-thought and never produce a structured
-> `tool_calls` response, so the agent loop cannot run.
+> **Quantization note:** `Q4_K_M` on llama-server b10150 is the verified reference configuration
+> and produced correct tool calls plus complete four-section diagnoses. Heavily quantized
+> variants below that tier remain more prone to drift and truncation; if tool calls stop
+> appearing, move up a quantization level before changing any runtime setting.
 
 ### 2. Install Network Doctor
 
@@ -237,6 +239,24 @@ minicpm-network-doctor --thinking \
   "HTTPS to registry.npmjs.org works in a browser but the package manager reports a certificate error"
 ```
 
+`--thinking` changes three defaults, because a 2B thinking chain is several times more expensive
+than a plain turn:
+
+| | default | why |
+|---|---|---|
+| `--max-tokens` | `2048` → `8192` | measured chains ran 1.1k-25.5k characters; 2048 was cut off mid-thought by `finish_reason=length` |
+| `--timeout` | `180` → `600` | a full-budget thinking turn routinely exceeds 180s |
+| `temperature` | `0.4` → `0.6` | thinking benefits from a little more exploration |
+
+Override either budget directly, e.g. `--thinking --max-tokens 4096 --timeout 300`. If a thinking
+turn still runs out of room, the runtime returns a partial diagnosis carrying the evidence already
+collected rather than failing, and reports `model_response_truncated_by_budget` in `warnings`.
+
+Note that even 8192 does not guarantee convergence: in testing, a multi-turn `--thinking` run still
+truncated after four successful tool calls. Raising the default further would only lengthen every
+turn against the timeout ceiling, so the budget stays a knob you own rather than a value the
+runtime guesses at.
+
 Print the complete tool trace as JSON:
 
 ```bash
@@ -250,11 +270,11 @@ minicpm-network-doctor --check-server
 minicpm-network-doctor --progress "TLS fails for https://example.com"
 ```
 
-Loopback endpoints such as Ollama at `127.0.0.1` connect directly by default so a desktop proxy
-cannot intercept the model request. Remote endpoints continue to honor proxy settings. Override
-either decision with `--use-model-proxy` or `--no-model-proxy`. Model API retries default to zero
-to keep a slow local failure bounded; use `--max-retries` only when a remote endpoint benefits
-from retries.
+Loopback endpoints such as a local `llama-server` at `127.0.0.1` connect directly by default
+so a desktop proxy cannot intercept the model request. Remote endpoints continue to honor proxy
+settings. Override either decision with `--use-model-proxy` or `--no-model-proxy`. Model API
+retries default to zero to keep a slow local failure bounded; use `--max-retries` only when a
+remote endpoint benefits from retries.
 
 `--json` includes `schema_version`, `status` (`complete`, `partial`, or `error`), `targets`,
 `warnings`, and the complete `tool_events` trace. Progress is written to stderr, so it is safe to
@@ -264,8 +284,8 @@ combine with machine-readable JSON on stdout.
 
 | Environment variable | Default |
 |----------------------|---------|
-| `MINICPM_BASE_URL` | `http://127.0.0.1:30000/v1` |
-| `MINICPM_MODEL` | `openbmb/MiniCPM5-1B` |
+| `MINICPM_BASE_URL` | `http://127.0.0.1:8080/v1` |
+| `MINICPM_MODEL` | `minicpm5-2b` |
 | `MINICPM_API_KEY` | `not-needed` |
 
 Equivalent CLI flags are available through:
@@ -314,7 +334,7 @@ guidance.
 
 ## Known Limitations
 
-MiniCPM5-1B is a 1B-parameter model. The runtime adds several guardrails to
+MiniCPM5-2B is a 2B-parameter model. The runtime adds several guardrails to
 compensate, but some failure modes are inherent to the model and cannot be fully
 solved in code:
 
@@ -322,11 +342,13 @@ solved in code:
   `tool_choice="required"` yet occasionally return plain text. The runtime rejects
   those ungrounded answers and retries, but a persistently non-compliant backend
   still ends with a clear no-evidence error instead of a diagnosis.
-- **Quantization degrades tool-call stability.** Heavily quantized GGUFs
-  (`Q4_K_M`) emit longer chain-of-thought and are more prone to drift or
-  truncation than `F16`. Prefer `F16` for the most reliable diagnosis loop. The
-  `--thinking` flag helps with hard cases but also consumes more of the token
-  budget on reasoning, which can itself truncate the answer.
+- **Thinking can exhaust its own budget.** In `--thinking` mode the model spends
+  most of `--max-tokens` on chain-of-thought and can be cut off by
+  `finish_reason=length` before it emits a tool call or an answer. llama.cpp
+  reports that cut-off text in `reasoning_content`, leaving `content` and
+  `tool_calls` empty; the runtime treats this as non-convergence and returns a
+  partial diagnosis with the evidence already gathered instead of discarding it.
+  Raise `--max-tokens` when you see `model_response_truncated_by_budget`.
 - **A fake-IP mapping is not a root cause.** It indicates a proxy-managed DNS
   path, which may be normal and healthy. Without a controlled direct/bypass
   comparison, the agent must leave the proxy's causal role unconfirmed.
@@ -344,10 +366,11 @@ solved in code:
   temperature. If a run stalls, the runtime returns a structured partial
   diagnosis (see [Agent Behavior](#agent-behavior)) so the evidence is not lost;
   retry with `--thinking` or a more specific symptom for a sharper result.
-- **Backend-specific behavior.** SGLang (Linux/NVIDIA GPU) is the reference
-  backend. Current Ollama releases honor OpenAI-compatible `reasoning_effort`,
-  while SGLang uses `chat_template_kwargs.enable_thinking`; older or different
-  runtimes may ignore one or both controls.
+- **Backend-specific behavior.** llama-server (llama.cpp) is the reference
+  backend and honors both `chat_template_kwargs.enable_thinking` and an
+  OpenAI-compatible `reasoning_effort` field. SGLang uses
+  `chat_template_kwargs.enable_thinking`; older or different runtimes may ignore
+  one or both controls, and the runtime retries without the rejected field.
 
 When the model behaves erratically, the most effective escalation is a stronger
 model (e.g. MiniCPM5 4B/8B) on a backend that reliably parses tool calls, not
@@ -396,8 +419,10 @@ for the evidence required before making reliability claims.
 
 ## Credits
 
-- [OpenBMB/MiniCPM](https://github.com/OpenBMB/MiniCPM) for MiniCPM5-1B and its tool-calling
+- [OpenBMB/MiniCPM](https://github.com/OpenBMB/MiniCPM) for MiniCPM5-2B and its tool-calling
   deployment guidance.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) for the `llama-server` runtime that serves the
+  reference endpoint.
 - [CacinieP/network-troubleshoot-skill](https://github.com/CacinieP/network-troubleshoot-skill)
   for the evidence-first network troubleshooting workflow that inspired this runtime.
 

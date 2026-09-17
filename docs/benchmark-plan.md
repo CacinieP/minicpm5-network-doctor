@@ -33,10 +33,17 @@ parser version, thinking mode, sampling parameters, and repository commit for ev
 
 Initial candidates:
 
-- SGLang with MiniCPM5-1B BF16 and the native `minicpm5` parser on a supported NVIDIA system.
-- Ollama with MiniCPM5-1B F16 on Apple Silicon.
+- llama-server (llama.cpp) with MiniCPM5-2B Q4_K_M on Apple Silicon — the v0.4.0 reference
+  backend. Partially covered by the [llama.cpp smoke record](evidence/2026-09-17-llama-cpp-2b.md),
+  which is not an aggregate score.
+- SGLang with MiniCPM5-2B BF16 and the native `minicpm5` parser on a supported NVIDIA system.
 - An available AIPC backend with Q8 GGUF.
-- Q4_K_M as an explicitly lower-confidence comparison, not a recommended baseline.
+- Q3_K_S or lower as an explicitly lower-confidence comparison, not a recommended baseline.
+- Ollama with a MiniCPM5 F16 GGUF on Apple Silicon.
+
+Note that the earlier F16-preference guidance assumed Ollama and SGLang. On llama-server b10150,
+Q4_K_M produced correct tool calls and complete four-section diagnoses, so Q4_K_M is the verified
+reference quantization rather than a lower-confidence tier.
 
 A configuration remains **untested** until its raw run artifacts are stored; hardware suitability
 must not be inferred from documentation alone.

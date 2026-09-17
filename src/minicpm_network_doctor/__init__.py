@@ -3,4 +3,4 @@
 from .agent import DiagnosisResult, NetworkDoctor
 
 __all__ = ["DiagnosisResult", "NetworkDoctor"]
-__version__ = "0.3.2"
+__version__ = "0.4.0"

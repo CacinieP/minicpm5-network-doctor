@@ -199,9 +199,10 @@ class NetworkDoctor:
         self,
         client: Any,
         *,
-        model: str = "openbmb/MiniCPM5-1B",
+        model: str = "minicpm5-2b",
         max_steps: int = 6,
         max_tool_calls: int = 12,
+        max_tokens: int | None = None,
         thinking: bool = False,
         system_prompt: str | None = None,
         on_tool_event: Callable[[ToolEvent], None] | None = None,
@@ -210,10 +211,17 @@ class NetworkDoctor:
             raise ValueError("max_steps must be between 1 and 12")
         if not 1 <= max_tool_calls <= 24:
             raise ValueError("max_tool_calls must be between 1 and 24")
+        if max_tokens is not None and not 256 <= max_tokens <= 32768:
+            raise ValueError("max_tokens must be between 256 and 32768")
         self.client = client
         self.model = model
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
+        # MiniCPM5-2B spends a large share of the budget on its thinking chain before
+        # emitting a tool call or an answer: measured chains on llama-server ran
+        # 1.1k-25.5k characters, so a shared 1024-token cap was cut off by
+        # finish_reason=length. Thinking therefore gets a much larger allowance.
+        self.max_tokens = max_tokens if max_tokens is not None else (8192 if thinking else 2048)
         self.thinking = thinking
         self.system_prompt = system_prompt or load_system_prompt()
         self.on_tool_event = on_tool_event
@@ -240,7 +248,7 @@ class NetworkDoctor:
                 # instead of drifting toward unrelated hosts.
                 "temperature": 0.6 if self.thinking else 0.4,
                 "top_p": 0.95,
-                "max_tokens": 1024,
+                "max_tokens": self.max_tokens,
                 "extra_body": {
                     "chat_template_kwargs": {"enable_thinking": self.thinking},
                 },
@@ -303,7 +311,18 @@ class NetworkDoctor:
             if not calls:
                 content = (getattr(message, "content", None) or "").strip()
                 if not content:
-                    raise NetworkDoctorError("MiniCPM5 returned neither text nor tool calls")
+                    reasoning = (getattr(message, "reasoning_content", None) or "").strip()
+                    if not reasoning:
+                        raise NetworkDoctorError("MiniCPM5 returned neither text nor tool calls")
+                    # llama.cpp reports a cut-off chain of thought in reasoning_content,
+                    # leaving both content and tool_calls empty. Keep the evidence gathered
+                    # so far; the post-loop path picks a partial diagnosis or StepLimit.
+                    warnings.append("model_response_truncated_by_budget")
+                    non_convergence_reason = (
+                        "the model exhausted its token budget while reasoning; "
+                        "raise --max-tokens to give it room to finish"
+                    )
+                    break
                 if not has_evidence:
                     warning = "backend_ignored_required_tool_choice"
                     if warning not in warnings:
