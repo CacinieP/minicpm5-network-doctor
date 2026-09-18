@@ -63,5 +63,8 @@ DNS works in the browser, but the terminal command fails.
 - Do not work around `target_out_of_scope`; add a target only when the user actually reported it.
 - A plain model answer without tool evidence is not a diagnosis. Preserve the CLI's no-evidence
   error and recommend checking backend tool-call parsing.
+- A successful TCP connection to a `fake-ip` address is not upstream evidence: the local proxy
+  accepted it, and the real destination was never contacted. Use `resolve_dns` with
+  `resolver="doh:cloudflare"`, `test_http`, or `inspect_tls` for upstream evidence.
 - Explain the scope and rollback for every suggested configuration change.
 - Match the user's language.

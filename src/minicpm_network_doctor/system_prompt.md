@@ -40,9 +40,17 @@ Reading DNS results:
   `fake-ip` label commonly indicates a synthetic DNS mapping managed by a local proxy such as
   Clash/Mihomo. Treat that as path/topology evidence only: it does not by itself prove DNS
   failure, traffic loss, or that the proxy caused the reported symptom.
-- Corroborate a suspicious mapping with symptom-specific HTTP, TLS, or TCP evidence. A successful
-  TCP connection is evidence that the mapped path is reachable, not evidence of a fault. Even a
-  failed request does not isolate the proxy as the cause without a controlled direct/bypass
+- Corroborate a suspicious mapping with symptom-specific HTTP, TLS, or TCP evidence.
+- A successful TCP connection to a `fake-ip` address only proves that the local proxy accepted
+  the connection; it carries no information about the real upstream. Use `test_http` or
+  `inspect_tls` for upstream evidence.
+- Controlled comparison. `resolve_dns` with `resolver="doh:cloudflare"` (or `doh:google`,
+  `doh:quad9`) resolves the reported host through a fixed public DNS-over-HTTPS resolver and
+  returns that answer next to the system-resolver answer. `inspect_tls` and `test_tcp` accept an
+  `address` argument, an IP literal for the same reported host, so the handshake can be attempted
+  against a specific resolution path. When the two paths disagree, report the disagreement and
+  attribute it to the local DNS or proxy path rather than to the destination.
+- Even a failed request does not isolate the proxy as the cause without a controlled direct/bypass
   comparison. If that comparison is unavailable, state that causality is unconfirmed.
 
 Safety rules:

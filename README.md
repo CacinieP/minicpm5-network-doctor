@@ -56,6 +56,8 @@ Evidence:
 - resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
   observation: "proxy-managed DNS path; mapping alone does not establish a connectivity failure"
 - test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
+  observation: "TCP success to a fake-IP address only proves that the local proxy accepted the
+  connection; it carries no information about the real upstream."
 
 Recommended action: temporarily add only registry.example.org to the proxy's direct/bypass
 list and retry once as a controlled comparison. Roll back by removing that one rule.
@@ -118,15 +120,37 @@ configuration. Any OpenAI-compatible runtime that returns native `tool_calls` al
 
 | Tool | Purpose |
 |------|---------|
-| `resolve_dns` | Resolve one hostname and report IPv4/IPv6 results |
-| `test_tcp` | Attempt one connection to a specified host and port |
-| `test_http` | Send HEAD, block cross-host redirects, and use a bodyless ranged GET on 405/501 |
-| `inspect_tls` | Validate TLS and summarize the peer certificate |
-| `inspect_proxy_environment` | Read environment and platform-effective proxies, with credentials redacted |
-| `inspect_hosts_file` | Check one reported host for a local hosts-file override |
-| `system_network_context` | Report OS context and redacted proxy settings |
+| `resolve_dns` | Look up what IP addresses a hostname points to. By default it asks your own system. Add `resolver="doh:cloudflare"` (or `doh:google`, `doh:quad9`) and it also asks a public DNS-over-HTTPS server, then shows both answers side by side |
+| `test_tcp` | Open one TCP connection to a host and port. Add `address=<IP>` to connect to one specific IP instead of whatever DNS returned |
+| `test_http` | Send HEAD, block redirects to another host, and fall back to a bodyless ranged GET when the server rejects HEAD |
+| `inspect_tls` | Check the TLS connection and read the certificate. Add `address=<IP>` to connect to one specific IP — the certificate is still checked against the hostname you reported |
+| `inspect_proxy_environment` | Read your proxy settings, with passwords removed |
+| `inspect_hosts_file` | Check whether one reported hostname is overridden in your local hosts file |
+| `system_network_context` | Report your OS and proxy settings, with passwords removed |
 
-There is no arbitrary command or port-scanning tool.
+There is no tool that runs arbitrary commands or scans ports.
+
+### Comparing your local DNS with the public answer
+
+Some proxies (Clash, Mihomo and similar, in TUN mode) answer DNS with a made-up address such as
+`198.18.x.x`. The TCP connection then succeeds in a couple of milliseconds, but that handshake was
+accepted by the proxy on your own machine — the real server was never contacted. So "TCP ok" there
+tells you nothing about whether the website itself is reachable.
+
+Two switches fix that, and neither of them changes any setting:
+
+- `resolver="doh:cloudflare"` asks a public resolver over HTTPS and returns its answer next to your
+  system's answer. HTTPS is used on purpose: plain DNS to a public server like `8.8.8.8` is usually
+  intercepted in TUN mode, while DNS-over-HTTPS is not.
+- `address=<IP>` makes `test_tcp` or `inspect_tls` connect to one specific IP. Handy right after the
+  lookup above, to reach the public IP instead of the fake one.
+
+If the two answers differ, your local DNS is rewriting the destination — say that, rather than
+blaming the website.
+
+The IP in `address` is not a new target: the hostname still has to be the one you reported, and
+`address` must be an IP, never a hostname. A comparison therefore cannot turn into a scan of some
+other host.
 
 ## Agent Behavior
 
@@ -143,6 +167,10 @@ Four runtime controls keep the small model honest and resilient:
   executed.
 - **Bounded work.** At most four calls are accepted from one model turn and the diagnosis-wide
   execution budget defaults to 12 calls (configurable up to 24).
+- **Controlled comparison without new targets.** `resolve_dns(resolver="doh:cloudflare")` shows what
+  a public resolver answers next to your local answer, and `test_tcp` / `inspect_tls` accept an
+  explicit IP for the reported host. The scope check still requires that host and refuses a hostname
+  in `address`, so a comparison cannot drift into scanning a host you never reported.
 - **Graceful non-convergence.** If the model calls the same tool three turns in a
   row without finishing, or exhausts the turn budget, the runtime stops and
   returns a structured **partial diagnosis** — the four sections are still

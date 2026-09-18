@@ -2,6 +2,54 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## 0.5.0 — 2026-09-17
+
+Closes the remaining review items of issue #1: what a successful TCP connection to a fake-IP
+address does and does not prove, and a way to actually run the controlled comparison the prompt
+already asks for.
+
+### Added
+
+- `resolve_dns` now accepts `resolver="doh:cloudflare"`, `"doh:google"`, or `"doh:quad9"`. In one
+  call you get the public resolver's answer **next to** your system's answer for the same hostname,
+  plus a plain sentence saying whether the two agree. If your local DNS is rewriting the
+  destination, you can see it here. The resolver is queried over HTTPS because plain DNS to a
+  public server is usually intercepted in TUN mode.
+- `test_tcp` and `inspect_tls` now accept `address=<IP>`, so a connection or TLS handshake can be
+  made to one specific IP. `inspect_tls` still checks the certificate against the hostname you
+  reported, so it verifies the host, not just the address.
+- An IP in `address` is not treated as a new target: the hostname still has to be the one you
+  reported, and a hostname in `address` is refused. A comparison cannot become a scan of another
+  host.
+
+### Fixed
+
+- `test_tcp` reports what it actually connected to (`peer_address`, `peer_classification`) and, when
+  that peer is a fake-IP address, attaches the caveat itself: the local proxy accepted the
+  connection, which says nothing about the real server. Previously this only lived in the prompt, so
+  it could be missed.
+- The prompt no longer calls a successful TCP connection evidence that "the mapped path is
+  reachable", which was easy to read as "the target is reachable".
+- The note about `100.64.0.0/10` addresses no longer says the address "is typically injected"; it now
+  says it is typically assigned by an overlay such as Tailscale, or used as a proxy's address pool.
+
+### Documentation
+
+- New `docs/evidence/README.md`: what an evidence record must contain before it counts as evidence
+  (version and commit, environment, whether the model was already loaded, the exact command line,
+  and how long you waited before interrupting anything).
+- The 2026-09-02 Ollama record now says which of those fields were never captured, so its
+  "inconclusive" result is no longer quoted as if it could be reproduced.
+
+### Verified
+
+- On a real Clash/Mihomo TUN setup (`docs/evidence/2026-09-17-doh-comparison.md`): `example.com`
+  resolved to `198.18.0.6` locally while the same call through Cloudflare returned real Cloudflare
+  addresses; `test_tcp` accepted the fake IP in 6.5 ms with the caveat attached; connecting to the
+  real IP took 8.1 ms; and the TLS check against that IP returned a valid certificate for
+  `example.com`. One run per check, so nothing here is a stability or accuracy claim.
+- Tests: 182 passed, 89.23% branch coverage, lint and format clean.
+
 ## 0.4.0 — 2026-09-17
 
 ### Changed

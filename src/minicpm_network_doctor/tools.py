@@ -20,8 +20,29 @@ from typing import Any
 
 from .scope import normalize_host, validate_tool_scope
 
-USER_AGENT = "minicpm-network-doctor/0.4.0"
+USER_AGENT = "minicpm-network-doctor/0.5.0"
 _HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
+
+
+# A TCP handshake that terminates inside a local TUN stack says nothing about the real
+# upstream. One constant lets resolve_dns and test_tcp emit identical deterministic wording.
+FAKE_IP_TCP_NOTE = (
+    "TCP success to a fake-IP address only proves that the local proxy accepted the "
+    "connection; it carries no information about the real upstream. Use test_http or "
+    "inspect_tls for upstream evidence."
+)
+
+# Fixed public DoH endpoints. Plain UDP/53 to a public resolver is typically hijacked in
+# TUN mode while DNS-over-HTTPS is not, which is what makes this a usable second
+# resolution path for a controlled comparison.
+_DOH_RESOLVERS: dict[str, str] = {
+    "doh:cloudflare": "https://cloudflare-dns.com/dns-query",
+    "doh:google": "https://dns.google/resolve",
+    "doh:quad9": "https://dns.quad9.net/dns-query",
+}
+_DNS_RECORD_TYPES = {"A": 1, "AAAA": 28}
+_DNS_CNAME_TYPE = 5
+_MAX_DOH_BODY = 65_536
 
 
 @dataclass(frozen=True)
@@ -92,6 +113,196 @@ def _validate_timeout(timeout: float) -> float:
     if not math.isfinite(value):
         raise ValueError("timeout must be finite")
     return max(0.5, min(value, 10.0))
+
+
+def _validate_explicit_address(address: str) -> str:
+    """Validate an explicit IP literal used to reach an already-reported host.
+
+    A hostname is rejected on purpose: an explicit *name* would let a call reach a host
+    the user never reported, while an explicit address is only a different resolution
+    path to the host that was reported.
+    """
+    if not isinstance(address, str):
+        raise ValueError("address must be a string")
+    normalized = _validate_host(address)
+    try:
+        ipaddress.ip_address(normalized.split("%", 1)[0])
+    except ValueError as exc:
+        raise ValueError("address must be an IP literal, not a hostname") from exc
+    return normalized
+
+
+def _validate_resolver(resolver: str) -> str:
+    if not isinstance(resolver, str):
+        raise ValueError("resolver must be a string")
+    value = resolver.strip().lower()
+    if value != "system" and value not in _DOH_RESOLVERS:
+        allowed = ", ".join(["system", *sorted(_DOH_RESOLVERS)])
+        raise ValueError(f"resolver must be one of: {allowed}")
+    return value
+
+
+def _doh_lookup(host: str, record_type: str, endpoint: str, timeout: float) -> list[str]:
+    """Query one fixed DoH endpoint and return the addresses it reports for ``host``."""
+    query = urllib.parse.urlencode({"name": host, "type": record_type})
+    request = urllib.request.Request(
+        f"{endpoint}?{query}",
+        headers={"User-Agent": USER_AGENT, "Accept": "application/dns-json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read(_MAX_DOH_BODY + 1)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"DNS-over-HTTPS resolver replied HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise ValueError(f"DNS-over-HTTPS request failed: {_short_error(exc)}") from exc
+    if len(body) > _MAX_DOH_BODY:
+        raise ValueError("DNS-over-HTTPS response was unexpectedly large")
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("DNS-over-HTTPS response was not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("DNS-over-HTTPS response was not a JSON object")
+    status = payload.get("Status")
+    if not isinstance(status, int) or status != 0:
+        raise ValueError(f"DNS-over-HTTPS resolver reported status {status}")
+
+    answers = payload.get("Answer")
+    if answers is None:
+        return []
+    if not isinstance(answers, list):
+        raise ValueError("DNS-over-HTTPS response had an unexpected Answer section")
+
+    # Accept an answer only when its owner name is the queried host or a CNAME the
+    # resolver already followed, so a response about another name cannot widen the check.
+    owner_names = {host}
+    addresses: list[str] = []
+    for answer in answers:
+        if not isinstance(answer, dict):
+            continue
+        name = str(answer.get("name") or "").strip().rstrip(".").lower()
+        record = answer.get("type")
+        data = answer.get("data")
+        if not isinstance(data, str):
+            continue
+        if record == _DNS_CNAME_TYPE:
+            owner_names.add(data.strip().rstrip(".").lower())
+            continue
+        if record != _DNS_RECORD_TYPES[record_type] or name not in owner_names:
+            continue
+        try:
+            ipaddress.ip_address(data)
+        except ValueError:
+            continue
+        if data not in addresses:
+            addresses.append(data)
+    return addresses
+
+
+def _address_entries(addresses: list[str]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for address in addresses:
+        family = "IPv6" if ":" in address else "IPv4"
+        key = f"{family}:{address}"
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(
+            {
+                "family": family,
+                "address": address,
+                "classification": _classify_address(address),
+            }
+        )
+    return entries
+
+
+def _system_address_entries(host: str, port: int) -> list[dict[str, str]]:
+    records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    addresses: list[str] = []
+    for family, _, _, _, sockaddr in records:
+        address = sockaddr[0]
+        if family == socket.AF_INET6:
+            address = address.split("%", 1)[0]
+        if address not in addresses:
+            addresses.append(address)
+    return _address_entries(addresses)
+
+
+def _path_labels(entries: list[dict[str, str]]) -> str:
+    labels = sorted({entry["classification"] for entry in entries})
+    return ", ".join(labels) if labels else "no addresses"
+
+
+def _comparison_observation(
+    resolver: str,
+    resolver_entries: list[dict[str, str]],
+    system_entries: list[dict[str, str]],
+    system_error: str | None,
+) -> str:
+    if system_error:
+        return (
+            f"The system resolver failed ({system_error}), so only the {resolver} answer is "
+            "available. That alone does not show which resolution path is correct."
+        )
+    if not system_entries:
+        return (
+            f"The system resolver returned no addresses while {resolver} returned "
+            f"{_path_labels(resolver_entries)}; the local resolution path produced nothing."
+        )
+    resolver_labels = {entry["classification"] for entry in resolver_entries}
+    system_labels = {entry["classification"] for entry in system_entries}
+    if resolver_labels == system_labels:
+        return (
+            f"The system resolver and {resolver} agree on the classification "
+            f"({_path_labels(system_entries)}), so the local DNS path is not rewriting "
+            "this host."
+        )
+    return (
+        f"The two resolution paths disagree: the system resolver returned "
+        f"{_path_labels(system_entries)} while {resolver} returned "
+        f"{_path_labels(resolver_entries)}. The local DNS answer is therefore not the "
+        "public DNS answer; do not treat the system result as the destination address."
+    )
+
+
+def _observations_for(entries: list[dict[str, str]]) -> list[str]:
+    """Deterministic, blame-free notes for the address classes in one result."""
+    observations: list[str] = []
+    non_public = sorted(
+        {entry["classification"] for entry in entries if entry["classification"] != "public"}
+    )
+    for label in non_public:
+        if label.startswith("fake-ip"):
+            observations.append(
+                f"The resolved address is in the {label} range, which is a reserved "
+                "benchmarking block commonly used by Clash/Mihomo for synthetic "
+                "fake-IP DNS mappings. This identifies a proxy-managed DNS path. "
+                "By itself, the mapping does not establish a connectivity failure "
+                f"or explain the reported symptom. {FAKE_IP_TCP_NOTE}"
+            )
+        elif label.startswith("cg nat"):
+            observations.append(
+                f"The resolved address is in the {label} range, which is not globally "
+                "routable and is typically assigned by an overlay such as Tailscale, "
+                "or used as a proxy address pool."
+            )
+        elif label in {"private", "loopback", "link-local"}:
+            observations.append(
+                f"The resolved address is {label}, not a public address. A public "
+                "hostname resolving locally usually means a local override, split-horizon "
+                "DNS, or a proxy mapping."
+            )
+        elif label == "documentation":
+            observations.append(
+                f"The resolved address is in a documentation/test range ({label}); this "
+                "is never a real server address and indicates DNS is returning a placeholder."
+            )
+    if entries and all(entry["classification"] == "public" for entry in entries):
+        observations.append("All resolved addresses are public routable IPs.")
+    return observations
 
 
 def _classify_address(address: str) -> str:
@@ -210,79 +421,89 @@ def _flatten_name(parts: Any) -> str | None:
     return ", ".join(values) or None
 
 
-def resolve_dns(host: str, port: int = 443) -> dict[str, Any]:
+def resolve_dns(host: str, port: int = 443, resolver: str = "system") -> dict[str, Any]:
+    """Resolve one host through the system resolver or a fixed public DoH endpoint.
+
+    With ``resolver="system"`` (default) this is a plain system lookup. With a
+    ``doh:*`` resolver the result also carries the system-resolver answer for the same
+    host, so one call can show whether the local DNS path rewrites the destination.
+    """
     checked_host = _validate_host(host)
     checked_port = _validate_port(port)
+    checked_resolver = _validate_resolver(resolver)
     started = time.monotonic()
-    records = socket.getaddrinfo(checked_host, checked_port, type=socket.SOCK_STREAM)
-    addresses: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for family, _, _, _, sockaddr in records:
-        address = sockaddr[0]
-        family_name = "IPv6" if family == socket.AF_INET6 else "IPv4"
-        key = (family_name, address)
-        if key not in seen:
-            seen.add(key)
-            addresses.append(
-                {
-                    "family": family_name,
-                    "address": address,
-                    "classification": _classify_address(address),
-                }
-            )
 
-    observations: list[str] = []
-    non_public = sorted({a["classification"] for a in addresses if a["classification"] != "public"})
-    for label in non_public:
-        if label.startswith("fake-ip"):
-            observations.append(
-                f"The resolved address is in the {label} range, which is a reserved "
-                "benchmarking block commonly used by Clash/Mihomo for synthetic "
-                "fake-IP DNS mappings. This identifies a proxy-managed DNS path. "
-                "By itself, the mapping does not establish a connectivity failure "
-                "or explain the reported symptom."
-            )
-        elif label.startswith("cg nat"):
-            observations.append(
-                f"The resolved address is in the {label} range, which is not globally "
-                "routable and is typically injected by an overlay such as Tailscale or "
-                "a proxy."
-            )
-        elif label in {"private", "loopback", "link-local"}:
-            observations.append(
-                f"The resolved address is {label}, not a public address. A public "
-                "hostname resolving locally usually means a local override, split-horizon "
-                "DNS, or a proxy mapping."
-            )
-        elif label == "documentation":
-            observations.append(
-                f"The resolved address is in a documentation/test range ({label}); this "
-                "is never a real server address and indicates DNS is returning a placeholder."
-            )
-    if addresses and all(a["classification"] == "public" for a in addresses):
-        observations.append("All resolved addresses are public routable IPs.")
+    system_error: str | None = None
+    system_entries: list[dict[str, str]] = []
+    try:
+        system_entries = _system_address_entries(checked_host, checked_port)
+    except Exception as exc:
+        if checked_resolver == "system":
+            raise
+        system_error = _short_error(exc)
 
-    return {
-        "ok": bool(addresses),
+    if checked_resolver == "system":
+        entries = system_entries
+    else:
+        addresses: list[str] = []
+        for record_type in ("A", "AAAA"):
+            addresses.extend(
+                _doh_lookup(
+                    checked_host,
+                    record_type,
+                    _DOH_RESOLVERS[checked_resolver],
+                    timeout=_validate_timeout(8.0),
+                )
+            )
+        entries = _address_entries(addresses)
+
+    observations = _observations_for(entries)
+    if checked_resolver != "system":
+        observations.append(
+            _comparison_observation(checked_resolver, entries, system_entries, system_error)
+        )
+
+    result: dict[str, Any] = {
+        "ok": bool(entries),
         "host": checked_host,
-        "addresses": addresses[:8],
+        "resolver": checked_resolver,
+        "addresses": entries[:8],
         "observations": observations,
         "duration_ms": round((time.monotonic() - started) * 1000, 1),
     }
+    if checked_resolver != "system":
+        # The comparison half of the result: what the local stack would have returned.
+        result["system_addresses"] = system_entries[:8]
+        result["system_resolver_error"] = system_error
+    return result
 
 
-def test_tcp(host: str, port: int, timeout: float = 5.0) -> dict[str, Any]:
+def test_tcp(
+    host: str,
+    port: int,
+    timeout: float = 5.0,
+    address: str | None = None,
+) -> dict[str, Any]:
     checked_host = _validate_host(host)
     checked_port = _validate_port(port)
     checked_timeout = _validate_timeout(timeout)
+    checked_address = _validate_explicit_address(address) if address is not None else None
+    connect_target = checked_address or checked_host
     started = time.monotonic()
-    with socket.create_connection((checked_host, checked_port), timeout=checked_timeout) as conn:
+    with socket.create_connection((connect_target, checked_port), timeout=checked_timeout) as conn:
         peer = conn.getpeername()
+    peer_address = peer[0]
+    classification = _classify_address(peer_address)
+    observations = [FAKE_IP_TCP_NOTE] if classification.startswith("fake-ip") else []
     return {
         "ok": True,
         "host": checked_host,
         "port": checked_port,
-        "peer_address": peer[0],
+        "address": checked_address,
+        "connect_address": connect_target,
+        "peer_address": peer_address,
+        "peer_classification": classification,
+        "observations": observations,
         "duration_ms": round((time.monotonic() - started) * 1000, 1),
     }
 
@@ -342,17 +563,29 @@ def test_http(url: str, timeout: float = 8.0, use_environment_proxy: bool = True
     }
 
 
-def inspect_tls(host: str, port: int = 443, timeout: float = 8.0) -> dict[str, Any]:
+def inspect_tls(
+    host: str,
+    port: int = 443,
+    timeout: float = 8.0,
+    address: str | None = None,
+) -> dict[str, Any]:
+    """Validate TLS for ``host``, optionally against an explicit upstream address.
+
+    ``address`` only changes where the TCP connection goes: the SNI and certificate
+    checks still use the reported host, so the call stays a check of that host.
+    """
     checked_host = _validate_host(host)
     checked_port = _validate_port(port)
     checked_timeout = _validate_timeout(timeout)
+    checked_address = _validate_explicit_address(address) if address is not None else None
+    connect_target = checked_address or checked_host
     context = ssl.create_default_context()
     set_alpn_protocols = getattr(context, "set_alpn_protocols", None)
     if set_alpn_protocols is not None:
         set_alpn_protocols(["h2", "http/1.1"])
     started = time.monotonic()
     with (
-        socket.create_connection((checked_host, checked_port), timeout=checked_timeout) as raw,
+        socket.create_connection((connect_target, checked_port), timeout=checked_timeout) as raw,
         context.wrap_socket(raw, server_hostname=checked_host) as wrapped,
     ):
         certificate = wrapped.getpeercert()
@@ -372,6 +605,8 @@ def inspect_tls(host: str, port: int = 443, timeout: float = 8.0) -> dict[str, A
         "ok": True,
         "host": checked_host,
         "port": checked_port,
+        "address": checked_address,
+        "connect_address": connect_target,
         "protocol": protocol,
         "cipher": cipher[0] if cipher else None,
         "alpn_protocol": alpn_protocol,
@@ -498,7 +733,12 @@ def system_network_context() -> dict[str, Any]:
 TOOLS: dict[str, ToolSpec] = {
     "resolve_dns": ToolSpec(
         name="resolve_dns",
-        description="Resolve one hostname and report its IPv4 and IPv6 addresses.",
+        description=(
+            "Resolve one hostname and report its IPv4 and IPv6 addresses. Use "
+            'resolver="doh:cloudflare" (or doh:google, doh:quad9) to also get the '
+            "system-resolver answer for the same host, which shows whether the local DNS "
+            "path rewrites the destination."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -508,6 +748,15 @@ TOOLS: dict[str, ToolSpec] = {
                     "description": "Service port used for address selection.",
                     "default": 443,
                 },
+                "resolver": {
+                    "type": "string",
+                    "description": (
+                        "'system' for the local resolver (default), or a fixed public "
+                        "DNS-over-HTTPS resolver: 'doh:cloudflare', 'doh:google', "
+                        "'doh:quad9'."
+                    ),
+                    "default": "system",
+                },
             },
             "required": ["host"],
             "additionalProperties": False,
@@ -516,7 +765,10 @@ TOOLS: dict[str, ToolSpec] = {
     ),
     "test_tcp": ToolSpec(
         name="test_tcp",
-        description="Attempt one TCP connection to a specific host and port.",
+        description=(
+            "Attempt one TCP connection to a specific host and port. Pass address to reach "
+            "the reported host on an explicit IP instead of the local DNS answer."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -526,6 +778,13 @@ TOOLS: dict[str, ToolSpec] = {
                     "type": "number",
                     "description": "Timeout in seconds, clamped to 0.5-10.",
                     "default": 5,
+                },
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "Optional IP literal to connect to, for a controlled comparison "
+                        "against the reported host; a hostname is rejected."
+                    ),
                 },
             },
             "required": ["host", "port"],
@@ -561,7 +820,11 @@ TOOLS: dict[str, ToolSpec] = {
     ),
     "inspect_tls": ToolSpec(
         name="inspect_tls",
-        description="Validate the TLS connection and summarize the peer certificate.",
+        description=(
+            "Validate the TLS connection and summarize the peer certificate. Pass address to "
+            "handshake against an explicit IP while still checking the reported host's SNI "
+            "and certificate."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -575,6 +838,13 @@ TOOLS: dict[str, ToolSpec] = {
                     "type": "number",
                     "description": "Timeout in seconds, clamped to 0.5-10.",
                     "default": 8,
+                },
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "Optional IP literal to connect to for a controlled comparison; the "
+                        "SNI and certificate checks still use host. A hostname is rejected."
+                    ),
                 },
             },
             "required": ["host"],

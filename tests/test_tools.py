@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import email.message
 import io
+import json
 import math
 import socket
 import urllib.error
@@ -10,10 +11,12 @@ import urllib.request
 import pytest
 
 from minicpm_network_doctor.tools import (
+    FAKE_IP_TCP_NOTE,
     TOOLS,
     _classify_address,
     _ScopedRedirectHandler,
     _validate_host,
+    _validate_resolver,
     _validate_timeout,
     _validate_url,
     execute_tool,
@@ -562,3 +565,354 @@ def test_hosts_file_size_limit_becomes_safe_tool_error(monkeypatch, tmp_path) ->
     assert result["ok"] is False
     assert result["error_type"] == "ValueError"
     assert "unexpectedly large" in result["error"]
+
+
+# --- Issue #1 follow-ups: fake-IP TCP semantics, deterministic caveats, DoH comparison ---
+
+
+def _system_records(addresses):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (address, 443)) for address in addresses]
+
+
+class _DohResponse:
+    def __init__(self, payload: dict) -> None:
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def read(self, limit):
+        return self._body[:limit]
+
+
+def _fake_doh(monkeypatch, payloads, calls=None):
+    """Serve a queue of DoH JSON payloads and record every requested query."""
+
+    def urlopen(request, timeout):  # noqa: ARG001
+        if calls is not None:
+            calls.append(request.full_url)
+        return _DohResponse(payloads.pop(0))
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.urllib.request.urlopen", urlopen)
+
+
+def test_resolver_validation_only_accepts_system_and_fixed_doh_endpoints() -> None:
+    assert _validate_resolver("system") == "system"
+    assert _validate_resolver(" DOH:Cloudflare ") == "doh:cloudflare"
+    for value in ("doh:opendns", "udp:1.1.1.1", "", None):
+        with pytest.raises(ValueError):
+            _validate_resolver(value)
+
+
+def test_resolve_dns_rejects_unknown_resolver_without_network_access() -> None:
+    result = execute_tool("resolve_dns", {"host": "example.com", "resolver": "doh:opendns"})
+
+    assert result["ok"] is False
+    assert result["error_type"] == "ValueError"
+
+
+def test_resolve_dns_doh_returns_both_resolution_paths(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["198.18.0.190"]),
+    )
+    _fake_doh(
+        monkeypatch,
+        [
+            {
+                "Status": 0,
+                "Answer": [{"name": "registry.npmjs.org.", "type": 1, "data": "104.16.1.1"}],
+            },
+            {"Status": 0, "Answer": []},
+        ],
+    )
+
+    result = resolve_dns("registry.npmjs.org", resolver="doh:cloudflare")
+
+    assert result["resolver"] == "doh:cloudflare"
+    assert [item["address"] for item in result["addresses"]] == ["104.16.1.1"]
+    assert result["addresses"][0]["classification"] == "public"
+    assert [item["address"] for item in result["system_addresses"]] == ["198.18.0.190"]
+    assert result["system_resolver_error"] is None
+    observation = " ".join(result["observations"])
+    assert "paths disagree" in observation
+    assert "not the public DNS answer" in observation
+
+
+def test_resolve_dns_doh_follows_cname_owner_names(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["93.184.216.34"]),
+    )
+    _fake_doh(
+        monkeypatch,
+        [
+            {
+                "Status": 0,
+                "Answer": [
+                    {"name": "registry.npmjs.org.", "type": 5, "data": "cdn.example.net."},
+                    {"name": "cdn.example.net.", "type": 1, "data": "203.0.113.9"},
+                    {"name": "unrelated.example.", "type": 1, "data": "198.51.100.7"},
+                ],
+            },
+            {"Status": 0, "Answer": []},
+        ],
+    )
+
+    result = resolve_dns("registry.npmjs.org", resolver="doh:google")
+
+    assert [item["address"] for item in result["addresses"]] == ["203.0.113.9"]
+
+
+def test_resolve_dns_doh_reports_agreement_when_paths_match(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["104.16.1.1"]),
+    )
+    _fake_doh(
+        monkeypatch,
+        [
+            {"Status": 0, "Answer": [{"name": "example.com.", "type": 1, "data": "104.16.1.1"}]},
+            {"Status": 0, "Answer": []},
+        ],
+    )
+
+    result = resolve_dns("example.com", resolver="doh:quad9")
+
+    observation = " ".join(result["observations"])
+    assert "agree on the classification" in observation
+    assert "paths disagree" not in observation
+
+
+def test_resolve_dns_doh_survives_a_failing_system_resolver(monkeypatch) -> None:
+    def failing_getaddrinfo(*args, **kwargs):
+        raise OSError("temporary failure in name resolution")
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.socket.getaddrinfo", failing_getaddrinfo)
+    _fake_doh(
+        monkeypatch,
+        [
+            {"Status": 0, "Answer": [{"name": "example.com.", "type": 1, "data": "93.184.216.34"}]},
+            {"Status": 0, "Answer": []},
+        ],
+    )
+
+    result = resolve_dns("example.com", resolver="doh:cloudflare")
+
+    assert result["ok"] is True
+    assert result["system_addresses"] == []
+    assert "temporary failure in name resolution" in result["system_resolver_error"]
+    assert "system resolver failed" in " ".join(result["observations"])
+
+
+def test_resolve_dns_still_fails_when_the_system_resolver_fails() -> None:
+    def failing_getaddrinfo(*args, **kwargs):
+        raise OSError("temporary failure in name resolution")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("minicpm_network_doctor.tools.socket.getaddrinfo", failing_getaddrinfo)
+        result = execute_tool("resolve_dns", {"host": "example.com"})
+
+    assert result["ok"] is False
+    assert result["error_type"] == "OSError"
+
+
+@pytest.mark.parametrize(
+    "payload,expected_error",
+    [
+        ({"Status": 2, "Answer": []}, "status 2"),
+        ({"Status": 0, "Answer": "not-a-list"}, "unexpected Answer section"),
+        (
+            {
+                "Status": 0,
+                "Answer": [{"name": "other.example.", "type": 1, "data": "93.184.216.34"}],
+            },
+            None,
+        ),
+        ({"Status": 0, "Answer": [{"name": "example.com.", "type": 1, "data": "not-an-ip"}]}, None),
+    ],
+)
+def test_resolve_dns_doh_ignores_or_rejects_untrustworthy_answers(
+    monkeypatch, payload, expected_error
+) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["93.184.216.34"]),
+    )
+    _fake_doh(monkeypatch, [payload, {"Status": 0, "Answer": []}])
+
+    result = execute_tool("resolve_dns", {"host": "example.com", "resolver": "doh:cloudflare"})
+
+    assert result["ok"] is False
+    if expected_error is None:
+        # An answer about another name, or unparsable data, is dropped rather than reported.
+        assert result["addresses"] == []
+    else:
+        assert expected_error in result["error"]
+
+
+def test_resolve_dns_doh_transport_failures_become_tool_errors(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["93.184.216.34"]),
+    )
+
+    def failing_urlopen(request, timeout):  # noqa: ARG001
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.urllib.request.urlopen", failing_urlopen)
+
+    result = execute_tool("resolve_dns", {"host": "example.com", "resolver": "doh:google"})
+
+    assert result["ok"] is False
+    assert "DNS-over-HTTPS request failed" in result["error"]
+
+
+def test_fake_ip_observation_warns_that_tcp_says_nothing_about_upstream(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["198.18.0.190"]),
+    )
+
+    observation = " ".join(resolve_dns("registry.npmjs.org")["observations"])
+
+    assert FAKE_IP_TCP_NOTE in observation
+    assert "does not establish a connectivity failure" in observation
+
+
+def test_cg_nat_observation_avoids_causal_wording(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.socket.getaddrinfo",
+        lambda *args, **kwargs: _system_records(["100.64.0.1"]),
+    )
+
+    observation = " ".join(resolve_dns("vpn.example")["observations"])
+    lowered = observation.lower()
+
+    assert "overlay" in observation
+    assert "assigned by an overlay" in observation
+    for banned in ("inject", "hijack", "blackhol", "may be intercepting"):
+        assert banned not in lowered
+
+
+def test_tcp_flags_fake_ip_peer_and_reports_classification(monkeypatch) -> None:
+    captured = {}
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def getpeername(self):
+            return ("198.18.0.190", 443)
+
+    def connect(address, timeout):
+        captured["address"] = address
+        captured["timeout"] = timeout
+        return Connection()
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.socket.create_connection", connect)
+
+    result = run_tcp_test("registry.npmjs.org", 443)
+
+    assert captured["address"] == ("registry.npmjs.org", 443)
+    assert result["peer_classification"].startswith("fake-ip")
+    assert result["observations"] == [FAKE_IP_TCP_NOTE]
+    assert result["connect_address"] == "registry.npmjs.org"
+    assert result["address"] is None
+
+
+def test_tcp_with_explicit_address_connects_to_that_address(monkeypatch) -> None:
+    captured = {}
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def getpeername(self):
+            return ("104.16.1.1", 443)
+
+    def connect(address, timeout):
+        captured["address"] = address
+        return Connection()
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.socket.create_connection", connect)
+
+    result = run_tcp_test("registry.npmjs.org", 443, address="104.16.1.1")
+
+    assert captured["address"] == ("104.16.1.1", 443)
+    assert result["host"] == "registry.npmjs.org"
+    assert result["address"] == "104.16.1.1"
+    assert result["connect_address"] == "104.16.1.1"
+    assert result["peer_classification"] == "public"
+    assert result["observations"] == []
+
+
+@pytest.mark.parametrize("address", ["other.example", "", "registry.npmjs.org/path", "not-an-ip"])
+def test_explicit_address_must_be_an_ip_literal(address) -> None:
+    result = execute_tool("test_tcp", {"host": "example.com", "port": 443, "address": address})
+
+    assert result["ok"] is False
+    assert result["error_type"] == "ValueError"
+
+
+def test_inspect_tls_with_explicit_address_keeps_the_reported_host_sni(monkeypatch) -> None:
+    certificate = {
+        "subject": ((("commonName", "example.com"),),),
+        "issuer": ((("organizationName", "Test CA"),),),
+        "subjectAltName": (("DNS", "example.com"),),
+        "notAfter": "Jan  1 00:00:00 2030 GMT",
+    }
+    captured = {}
+
+    class Raw:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    class Wrapped(Raw):
+        def getpeercert(self):
+            return certificate
+
+        def version(self):
+            return "TLSv1.3"
+
+        def cipher(self):
+            return ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+
+        def selected_alpn_protocol(self):
+            return "h2"
+
+    class Context:
+        def set_alpn_protocols(self, protocols):
+            return None
+
+        def wrap_socket(self, raw, server_hostname):
+            captured["server_hostname"] = server_hostname
+            return Wrapped()
+
+    def connect(address, timeout):
+        captured["address"] = address
+        return Raw()
+
+    monkeypatch.setattr("minicpm_network_doctor.tools.socket.create_connection", connect)
+    monkeypatch.setattr(
+        "minicpm_network_doctor.tools.ssl.create_default_context", lambda: Context()
+    )
+
+    result = inspect_tls("example.com", address="93.184.216.34")
+
+    assert captured["address"] == ("93.184.216.34", 443)
+    assert captured["server_hostname"] == "example.com"
+    assert result["connect_address"] == "93.184.216.34"
+    assert result["subject_alt_names"] == ["example.com"]

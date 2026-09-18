@@ -27,3 +27,20 @@ The smoke run confirms that the endpoint, neutral deterministic fake-IP observat
 timeout error path operate on the real local stack. It does **not** prove that the model reliably
 selects tools, converges, or diagnoses the correct cause. The F16 model was unloaded after the
 check; no model files or system settings were changed.
+
+## Addendum — 2026-09-17: what this record cannot reproduce
+
+The `Full F16 diagnosis` row above says *Inconclusive*. To tell "the model never called a tool" apart
+from "the first F16 load simply took longer than anyone waited", the record would have needed the
+details below. They were not written down at the time and **cannot be recovered afterwards**:
+
+- the wall-clock time actually waited before the manual interruption;
+- the full CLI invocation (`--thinking`, `--timeout`, `--max-tokens`, `--max-steps`,
+  `--max-tool-calls`, model name), so the defaults in effect for that version are not stated here;
+- whether the model was cold-loading on the first request;
+- the Ollama `num_ctx` / `keep_alive` settings in effect.
+
+So the row stays as a historical note that the loop was exercised, and this record is not citable as
+evidence about how the model behaves. The required-field checklist that would have captured
+these fields is now in [`README.md`](README.md), and a real-model run with the llama.cpp backend is
+recorded in [`2026-09-17-llama-cpp-2b.md`](2026-09-17-llama-cpp-2b.md).
