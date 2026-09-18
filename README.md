@@ -40,30 +40,38 @@ proxy environment, and package download problems without giving the model arbitr
 
 ## See it work
 
-A typical run — a developer reports that `npm install` times out. The agent resolves the host,
-recognizes a proxy-managed fake-IP mapping, and states what that evidence can and cannot establish:
+A **verbatim capture from a real run** — a developer reports that `npm install` times out.
+The agent resolves the host, recognizes a proxy-managed fake-IP mapping, and states what that
+evidence can and cannot establish. The whole run took 38 seconds; the environment and the full
+session log are in [the evidence record](docs/evidence/2026-09-18-2b-verbatim-example.md):
 
 ```text
 $ minicpm-network-doctor \
-    "npm install times out fetching registry.example.org; check the likely network cause"
+    "npm install 从 registry.npmjs.org 下载时超时，请检查最可能的网络原因"
 
-Diagnosis: registry.example.org resolves to a fake-IP mapping managed by a local proxy.
-This confirms that DNS is on a proxy-managed path. The TCP connection to the mapped
-address succeeded, so the current evidence does not establish that the mapping or proxy
-caused the npm timeout.
+Diagnosis: The reported `npm install` timeout from `registry.npmjs.org` is most likely caused
+by a local proxy (e.g. Clash/Mihomo) that is rewriting DNS and/or routing traffic through a
+synthetic fake-IP, causing the real upstream to be unreachable or slow.
 
-Evidence:
-- resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
-  observation: "proxy-managed DNS path; mapping alone does not establish a connectivity failure"
-- test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
-  observation: "TCP success to a fake-IP address only proves that the local proxy accepted the
-  connection; it carries no information about the real upstream."
+Evidence: `resolve_dns` for `registry.npmjs.org` returned only the fake-IP `198.18.0.38` (a
+`fake-ip`/benchmarking block), and `test_tcp` to that address succeeded only because the local
+proxy accepted the connection — it does not prove the real upstream is reachable. However,
+`test_http` to `https://registry.npmjs.org/` returned HTTP 200 via the proxy path, so the
+proxy path is active and the reported hostname resolves through it.
 
-Recommended action: temporarily add only registry.example.org to the proxy's direct/bypass
-list and retry once as a controlled comparison. Roll back by removing that one rule.
+Recommended action: Temporarily bypass the proxy so DNS and traffic go directly to the real
+`registry.npmjs.org` host. On Linux, unset `http_proxy`/`https_proxy`/`HTTP_PROXY`/`HTTPS_PROXY`
+(and any `NO_PROXY`/`NO_HTTP_PROXY`/`NO_HTTPS_PROXY` variants) before running `npm install`.
+On macOS/Windows, unset the corresponding environment variables. Rollback: re-set the
+variables to their previous values if you need to use the proxy again.
 
-Verification: curl -v --connect-timeout 10 https://registry.example.org/
+Verification: `env | grep -i proxy` should show no proxy variables set, then re-run
+`npm install` from `registry.npmjs.org` to confirm it works.
 ```
+
+Note that the question was asked in Chinese and the model answered in English — the 2B model
+does not always follow the answer-in-the-user's-language instruction on the reference stack;
+see [Known Limitations](#known-limitations).
 
 Every value under Evidence is produced by the read-only tools and surfaced verbatim. The model's
 diagnosis may still be uncertain; it must not turn a special-use address classification into an
@@ -76,7 +84,8 @@ unsupported root-cause claim. For the full tool trace, pass `--json`.
 - **Evidence before advice** — the model sees actual tool results before proposing a cause.
 - **Read-only execution** — the runtime observes network state but never changes configuration.
 - **Small-model friendly** — code controls the loop, schemas, limits, and duplicate-call handling.
-- **Bilingual** — the model is instructed to answer in the user's language.
+- **Bilingual** — the model is instructed to answer in the user's language, but the 2B model
+  does not always comply (see [Known Limitations](#known-limitations)).
 
 ## What's New in 0.3
 
@@ -409,7 +418,7 @@ guidance.
 
 ## Known Limitations
 
-MiniCPM5-2B is a 2B-parameter model. The runtime adds several guardrails to
+MiniCPM5-2B is a small, ~2.5B-parameter model. The runtime adds several guardrails to
 compensate, but some failure modes are inherent to the model and cannot be fully
 solved in code:
 
@@ -441,6 +450,12 @@ solved in code:
   temperature. If a run stalls, the runtime returns a structured partial
   diagnosis (see [Agent Behavior](#agent-behavior)) so the evidence is not lost;
   retry with `--thinking` or a more specific symptom for a sharper result.
+- **The answer language does not follow the question.** The system prompt asks the
+  model to answer in the user's language, but on the reference stack (Q4_K_M +
+  llama-server b10150) three consecutive Chinese questions each got an English
+  answer (see [the evidence record](docs/evidence/2026-09-18-2b-verbatim-example.md)).
+  The tool evidence itself is unaffected; when a Chinese conclusion is needed, take
+  the structured `--json` output and paraphrase it yourself.
 - **Backend-specific behavior.** llama-server (llama.cpp) is the reference
   backend and honors both `chat_template_kwargs.enable_thinking` and an
   OpenAI-compatible `reasoning_effort` field. SGLang uses
@@ -448,8 +463,9 @@ solved in code:
   one or both controls, and the runtime retries without the rejected field.
 
 When the model behaves erratically, the most effective escalation is a stronger
-model (e.g. MiniCPM5 4B/8B) on a backend that reliably parses tool calls, not
-more loop guardrails.
+model — the MiniCPM5 series tops out at 2B, so step up to the previous-generation
+MiniCPM4-8B or another model with reliable tool calling — on a backend that
+reliably parses tool calls, not more loop guardrails.
 
 ## Project Structure
 

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  让一个 20 亿参数的小模型 + 七个只读工具，在你自己的机器上调查异常 DNS 映射、端口不通、
+  让一个 25 亿参数的小模型 + 七个只读工具，在你自己的机器上调查异常 DNS 映射、端口不通、
   证书错误等网络问题。
 </p>
 
@@ -39,28 +39,36 @@ HTTP、TLS、本地端口、代理环境和包下载问题。
 
 ## 看它工作
 
-一次典型的运行——开发者反馈 `npm install` 超时。Agent 解析主机名，识别出由代理管理的
-fake-IP 映射，并明确说明现有证据能够和不能证明什么：
+下面是一次**真实运行的逐字记录**——开发者反馈 `npm install` 超时。Agent 解析主机名，识别出
+由代理管理的 fake-IP 映射，并明确说明现有证据能够和不能证明什么。全程 38 秒；运行环境与完整
+记录见 [实测记录](docs/evidence/2026-09-18-2b-verbatim-example.md)：
 
 ```text
 $ minicpm-network-doctor \
-    "npm install 从 registry.example.org 下载时超时，请检查最可能的网络原因"
+    "npm install 从 registry.npmjs.org 下载时超时，请检查最可能的网络原因"
 
-Diagnosis: registry.example.org 被解析为本地代理管理的 fake-IP 映射，说明 DNS 处于代理
-管理路径。与该映射地址的 TCP 连接成功，因此现有证据不能证明该映射或代理导致了 npm 超时。
+Diagnosis: The reported `npm install` timeout from `registry.npmjs.org` is most likely caused
+by a local proxy (e.g. Clash/Mihomo) that is rewriting DNS and/or routing traffic through a
+synthetic fake-IP, causing the real upstream to be unreachable or slow.
 
-Evidence:
-- resolve_dns (registry.example.org) -> address=198.18.0.42, classification=fake-ip (198.18.0.0/15)
-  观察提示："proxy-managed DNS path; mapping alone does not establish a connectivity failure"
-- test_tcp (registry.example.org:443) -> ok, peer=198.18.0.42, 3.1ms
-  观察提示："TCP success to a fake-IP address only proves that the local proxy accepted the
-  connection; it carries no information about the real upstream."
+Evidence: `resolve_dns` for `registry.npmjs.org` returned only the fake-IP `198.18.0.38` (a
+`fake-ip`/benchmarking block), and `test_tcp` to that address succeeded only because the local
+proxy accepted the connection — it does not prove the real upstream is reachable. However,
+`test_http` to `https://registry.npmjs.org/` returned HTTP 200 via the proxy path, so the
+proxy path is active and the reported hostname resolves through it.
 
-Recommended action: 只为 registry.example.org 临时增加直连/绕过规则并重试一次，作为
-受控对照。回滚方式：删除这一条临时规则。
+Recommended action: Temporarily bypass the proxy so DNS and traffic go directly to the real
+`registry.npmjs.org` host. On Linux, unset `http_proxy`/`https_proxy`/`HTTP_PROXY`/`HTTPS_PROXY`
+(and any `NO_PROXY`/`NO_HTTP_PROXY`/`NO_HTTPS_PROXY` variants) before running `npm install`.
+On macOS/Windows, unset the corresponding environment variables. Rollback: re-set the
+variables to their previous values if you need to use the proxy again.
 
-Verification: curl -v --connect-timeout 10 https://registry.example.org/
+Verification: `env | grep -i proxy` should show no proxy variables set, then re-run
+`npm install` from `registry.npmjs.org` to confirm it works.
 ```
+
+注意：这次提问是中文的，但模型用英文作答——在参考栈（Q4_K_M + llama-server b10150）上，
+2B 并不总遵守「按用户语言回答」的指令，详见[已知局限](#已知局限)。
 
 Evidence 段中的数值全部由只读工具产生并原样呈现。模型的诊断仍可能存在不确定性，不得把
 特殊用途地址分类直接升级为未经证实的根因结论。需要完整工具轨迹时，加上 `--json`。
@@ -71,7 +79,7 @@ Evidence 段中的数值全部由只读工具产生并原样呈现。模型的�
 - **先证据、后建议**——模型提出原因之前必须先看到真实工具结果。
 - **只读执行**——运行时只观察网络状态，不修改系统配置。
 - **适合小模型**——代码控制调用循环、参数结构、步数限制和重复调用处理。
-- **中英双语**——模型会按用户使用的语言回答。
+- **中英双语**——系统提示要求模型按用户使用的语言回答，但 2B 并不总是遵守（见[已知局限](#已知局限)）。
 
 ## 0.3 版更新
 
@@ -364,8 +372,8 @@ cp -R skills/minicpm-network-doctor ~/.codex/skills/
 
 ## 已知局限
 
-MiniCPM5-2B 是一个 20 亿参数的小模型。运行时添加了多重防护来弥补，但部分失败模式属于模型
-固有缺陷，无法在代码层面彻底解决：
+MiniCPM5-2B 是一个约 25 亿参数的小模型（MiniCPM5 系列只有 1B 和 2B 两档）。运行时添加了
+多重防护来弥补，但部分失败模式属于模型固有缺陷，无法在代码层面彻底解决：
 
 - **工具调用并非总可靠。** 部分后端（尤其是 Ollama）会接受 `tool_choice="required"` 却偶发返回
   纯文本。运行时会拒绝这种无证据回答并重试；如果后端持续不兼容，最终会明确报出“没有工具证据”，
@@ -386,13 +394,18 @@ MiniCPM5-2B 是一个 20 亿参数的小模型。运行时添加了多重防护�
 - **服务端随机性。** 同一温度下，不同运行的诊断质量会有波动。若某次运行停滞，运行时会返回
   结构化的部分诊断（见 [Agent 行为](#agent-行为)），已收集的证据不会丢失；可用 `--thinking`
   重试或提供更具体的症状以获得更精准的结果。
+- **回答语言不跟随提问。** 系统提示要求按用户语言作答，但在参考栈（Q4_K_M + llama-server
+  b10150）上实测，中文提问连续三次仍得到英文回答（见
+  [实测记录](docs/evidence/2026-09-18-2b-verbatim-example.md)）。工具证据本身不受影响；
+  需要中文结论时，可用 `--json` 拿到结构化结果后自行转述。
 - **后端差异。** llama-server（llama.cpp）是参考后端，同时识别
   `chat_template_kwargs.enable_thinking` 和 OpenAI 兼容的 `reasoning_effort` 字段。SGLang 使用
   `chat_template_kwargs.enable_thinking`；旧版或其他运行时仍可能忽略其中一个或全部控制字段，
   运行时会在字段被拒绝后去掉它重试。
 
-当模型表现不稳定时，最有效的升级是换用更强的模型（例如 MiniCPM5 4B/8B）并搭配能可靠解析
-工具调用的后端，而非继续增加循环层面的防护。
+当模型表现不稳定时，最有效的升级是换用更强的模型——MiniCPM5 系列没有比 2B 更大的版本，
+可考虑上一代 MiniCPM4-8B 或其他具备可靠工具调用能力的模型——并搭配能可靠解析工具调用的
+后端，而非继续增加循环层面的防护。
 
 ## 项目结构
 
