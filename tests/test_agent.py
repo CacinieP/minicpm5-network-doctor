@@ -495,3 +495,105 @@ def test_empty_response_without_reasoning_is_still_an_error(monkeypatch) -> None
 
     with pytest.raises(NetworkDoctorError, match="neither text nor tool calls"):
         NetworkDoctor(fake, max_steps=2, system_prompt="test prompt").diagnose("Check example.com")
+
+
+def test_synthesis_nudge_sent_after_evidence_turns(monkeypatch) -> None:
+    """After 3 turns with evidence, a nudge message is injected to force synthesis."""
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"}, "c1")]),
+            _response(tool_calls=[_tool_call("test_tcp", {"host": "example.com"}, "c2")]),
+            _response(tool_calls=[_tool_call("test_http", {"url": "https://example.com"}, "c3")]),
+            _response(content="Diagnosis: done."),
+        ]
+    )
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True},
+    )
+
+    result = NetworkDoctor(fake, max_steps=6, system_prompt="test prompt").diagnose(
+        "Check example.com"
+    )
+
+    assert result.model_turns == 4
+    # The 4th request should contain the synthesis nudge as the last user message
+    fourth_request = fake.fake_completions.requests[3]
+    last_msg = fourth_request["messages"][-1]
+    assert last_msg["role"] == "user"
+    assert "Do not call any more tools" in last_msg["content"]
+
+
+def test_synthesis_nudge_not_sent_before_threshold(monkeypatch) -> None:
+    """With only 2 evidence turns, the nudge should not appear."""
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"}, "c1")]),
+            _response(tool_calls=[_tool_call("test_tcp", {"host": "example.com"}, "c2")]),
+            _response(content="Diagnosis: done."),
+        ]
+    )
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True},
+    )
+
+    result = NetworkDoctor(fake, max_steps=6, system_prompt="test prompt").diagnose(
+        "Check example.com"
+    )
+
+    assert result.model_turns == 3
+    # No nudge in any request
+    for req in fake.fake_completions.requests:
+        for msg in req["messages"]:
+            assert "Do not call any more tools" not in (msg.get("content") or "")
+
+
+class _TimeoutError(Exception):
+    """Stand-in for an API timeout exception."""
+
+
+def test_timeout_with_evidence_returns_partial(monkeypatch) -> None:
+    """A timeout after evidence is collected returns a partial diagnosis, not an error."""
+    fake = _client(
+        [
+            _response(tool_calls=[_tool_call("resolve_dns", {"host": "example.com"}, "c1")]),
+        ]
+    )
+    call_count = 0
+
+    def sometimes_timeout_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        fake.fake_completions.requests.append(kwargs)
+        if call_count > 1:
+            raise _TimeoutError("Request timed out.")
+        return next(fake.fake_completions.responses)
+
+    fake.chat.completions.create = sometimes_timeout_create
+    monkeypatch.setattr(
+        "minicpm_network_doctor.agent.execute_tool",
+        lambda name, arguments, **kwargs: {"ok": True},
+    )
+
+    result = NetworkDoctor(fake, max_steps=6, system_prompt="test prompt").diagnose(
+        "Check example.com"
+    )
+
+    assert result.status == "partial"
+    assert "model_request_timed_out" in result.warnings
+    assert "timed out" in result.text
+    assert len(result.tool_events) == 1
+
+
+def test_timeout_without_evidence_still_raises(monkeypatch) -> None:
+    """A timeout on the very first turn (no evidence) is still a fatal error."""
+    fake = _client([])
+
+    def timeout_create(**kwargs):
+        raise _TimeoutError("Request timed out.")
+
+    fake.chat.completions.create = timeout_create
+
+    with pytest.raises(NetworkDoctorError, match="request failed"):
+        NetworkDoctor(fake, max_steps=2, system_prompt="test prompt").diagnose("Check example.com")

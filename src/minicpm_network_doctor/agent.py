@@ -19,6 +19,10 @@ _NON_EVIDENCE_ERRORS = {
     "tool_call_limit_exceeded",
     "unknown_tool",
 }
+# After this many turns with evidence, nudge the model to stop calling tools
+# and produce the final diagnosis. Small models tend to keep calling tools
+# indefinitely when left on tool_choice="auto".
+_SYNTHESIS_NUDGE_AFTER = 3
 
 
 class NetworkDoctorError(RuntimeError):
@@ -113,6 +117,17 @@ def _is_unsupported_reasoning_effort(exc: BaseException) -> bool:
     return status in {None, 400, 422} and any(
         marker in text for marker in ("reasoning_effort", "reasoning effort")
     )
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    """Detect an API timeout so evidence is not discarded on a slow turn."""
+    name = type(exc).__name__
+    if "Timeout" in name or "timed out" in str(exc).lower():
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and cause is not exc:
+        return _is_timeout_error(cause)
+    return False
 
 
 def _response_message(response: Any) -> Any:
@@ -292,6 +307,7 @@ class NetworkDoctor:
         last_tool_name: str | None = None
         tool_name_streak = 0
         non_convergence_reason: str | None = None
+        synthesis_nudge_sent = False
 
         for turn in range(1, self.max_steps + 1):
             # Force a tool call on the first turn so the model must gather evidence
@@ -299,12 +315,40 @@ class NetworkDoctor:
             # answers from priors ("I don't have that tool") instead of checking.
             has_evidence = _has_evidence(events)
             choice = "required" if not has_evidence else "auto"
+
+            # After enough evidence-gathering turns, nudge the model to synthesise
+            # instead of calling yet another tool. Without this, small models loop
+            # on tool_choice="auto" until max_steps is exhausted.
+            if (
+                has_evidence
+                and turn > _SYNTHESIS_NUDGE_AFTER
+                and not synthesis_nudge_sent
+            ):
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You have gathered enough evidence. Do not call any more tools. "
+                            "Write your final diagnosis now using the four required sections: "
+                            "Diagnosis:, Evidence:, Recommended action:, Verification:."
+                        ),
+                    }
+                )
+                synthesis_nudge_sent = True
+
             try:
                 response = self._create_with_fallback(
                     messages,
                     tool_choice=choice,
                 )
             except Exception as exc:
+                if _is_timeout_error(exc) and _has_evidence(events):
+                    warnings.append("model_request_timed_out")
+                    non_convergence_reason = (
+                        "the model request timed out; "
+                        "raise --timeout or reduce --max-tokens"
+                    )
+                    break
                 raise NetworkDoctorError(f"MiniCPM5 request failed: {exc}") from exc
 
             message = _response_message(response)
