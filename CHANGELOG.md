@@ -2,6 +2,20 @@
 
 All notable changes are documented here. The project follows semantic versioning.
 
+## 0.5.1 — 2026-09-18
+
+### Fixed
+
+- **Non-thinking mode did not converge.** The model called tools on every turn (up to
+  `max_steps=6`) without producing a final text answer. After 3 turns with evidence, a
+  synthesis nudge message is now injected instructing the model to stop calling tools
+  and write the diagnosis in the required four-section format. Verified against
+  llama-server + MiniCPM5-2B Q4_K_M: converges in 4 turns (29.7s) with `status=complete`.
+- **Thinking mode timeout discarded all evidence.** A slow turn exceeding the 600s
+  timeout raised `NetworkDoctorError` as a fatal error, losing every tool result gathered
+  in prior turns. Timeout errors are now caught when evidence exists, returning a partial
+  diagnosis with `model_request_timed_out` warning and exit code 0.
+
 ## 0.5.0 — 2026-09-17
 
 Closes the remaining review items of issue #1: what a successful TCP connection to a fake-IP

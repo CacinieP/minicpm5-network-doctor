@@ -20,7 +20,7 @@ from typing import Any
 
 from .scope import normalize_host, validate_tool_scope
 
-USER_AGENT = "minicpm-network-doctor/0.5.0"
+USER_AGENT = "minicpm-network-doctor/0.5.1"
 _HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
 
 
