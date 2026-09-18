@@ -1,45 +1,41 @@
 # Evidence records
 
-Every file in this directory is a **dated record of one real run**. It is evidence about the
-runtime, not a benchmark, and it is never allowed to stand in for the controlled evaluation
-defined in [`../benchmark-plan.md`](../benchmark-plan.md).
+Each file here is a **record of one real run on one machine**. It is evidence about the runtime, not
+a benchmark, and it can never replace the controlled evaluation described in
+[`../benchmark-plan.md`](../benchmark-plan.md).
 
-A record is only useful if another person can tell what was actually observed. Files here are
-therefore written against the checklist below; a field that was not captured is written down as
-*not captured*, never guessed or reconstructed afterwards.
+A record is only worth keeping if someone else can tell what actually happened. If a detail was not
+written down at the time, it is recorded as *not captured* — never guessed afterwards.
 
-## Required fields
+## What every record must contain
 
-1. **Exact version and source state** — package version plus the commit the run was made from.
-2. **Environment** — timestamp in UTC, host platform, backend name and version, model name,
-   quantization artifact and digest, and Python version.
-3. **Model residency** — whether the model was already loaded (warm) or had to be read from disk
-   for the first request (cold). A cold first load can exceed any patience budget and is not a
-   property of the agent.
-4. **Complete invocation** — the full command line: every flag and value, including
-   `--thinking`, `--timeout`, `--max-tokens`, `--max-steps`, `--max-tool-calls`, and the model
-   name. Defaults change between releases, so an invocation without its flags is not reproducible.
-5. **Backend parameters in effect** — context length, `keep_alive`/`-to`, parallelism, and any
-   chat-template flags the run depended on.
-6. **Per-check outcome** — one row per check, with the pass/fail outcome, the wall-clock time
-   observed, and the boundary of what the check can prove.
-7. **Interruption and waits** — if a run was interrupted, the wall-clock time actually waited
-   before the interruption. Without it, an "inconclusive" row cannot be separated from
-   "the wait was shorter than the work needed".
-8. **Explicit non-claims** — a closing paragraph stating what the run does *not* establish.
+1. **Version and commit** — the package version and the commit the run was made from.
+2. **Environment** — UTC timestamp, machine and OS, backend name and version, model name,
+   quantization file and its digest, Python version.
+3. **Was the model already loaded?** A model read from disk on its first request can take longer
+   than anyone is willing to wait, and that is not the agent's fault. A record that does not say
+   which case it was cannot separate "the model did nothing" from "the wait was too short".
+4. **The exact command** — every flag and value, including `--thinking`, `--timeout`,
+   `--max-tokens`, `--max-steps`, `--max-tool-calls`, and the model name. Defaults change between
+   releases, so a command line without its flags cannot be reproduced.
+5. **Backend settings in effect** — context length, `keep_alive`, parallelism, and any chat-template
+   flags the run depended on.
+6. **One row per check** — what happened, how long it took, and what the check can and cannot prove.
+7. **Any interruption** — if a run was stopped by hand, how long you actually waited first.
+8. **What it does not prove** — a short closing list of the claims the run does not support.
 
-## Reporting an inconclusive result
+## Writing down an "inconclusive" result
 
-`Inconclusive` is a legitimate outcome, but only when the record distinguishes the candidate
-causes. Before writing it, check whether the missing information is:
+"Inconclusive" is an honest outcome, but only if the record rules out the boring explanation. Before
+writing it, check which of these you can already exclude:
 
-- the model produced no tool call, or
-- the budget (tokens, timeout, patience) ran out first.
+- the model never emitted a tool call, or
+- the budget ran out first (tokens, timeout, or your own patience).
 
-If the record cannot tell those apart, say so in the row itself and treat the gap as a follow-up
-issue rather than a footnote in a passing release.
+If the record cannot tell those apart, say so in the row itself and open a follow-up issue for it
+instead of leaving it as a footnote in a passing release.
 
 ## Known gaps in existing records
 
-- `2026-09-02-ollama-f16-smoke.md` — recorded before this checklist existed; see its addendum for
-  the fields that were not captured and therefore cannot be reconstructed.
+- `2026-09-02-ollama-f16-smoke.md` — written before this checklist existed. Its addendum lists the
+  fields that were never captured and therefore cannot be recovered.

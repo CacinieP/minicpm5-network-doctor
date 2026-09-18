@@ -114,16 +114,34 @@ DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
 
 | 工具 | 用途 |
 |------|------|
-| `resolve_dns` | 解析一个主机名并报告 IPv4/IPv6 结果；带 `resolver="doh:cloudflare"`（或 `doh:google`、`doh:quad9`）时同时返回同一主机的系统解析结果 |
-| `test_tcp` | 尝试连接指定主机和端口一次；`address` 可连到指定 IP 做受控对照 |
-| `test_http` | 发送 HEAD，拦截跨主机跳转；遇到 405/501 时使用不读取正文的 Range GET |
-| `inspect_tls` | 验证 TLS 并概括对端证书；`address` 连到指定 IP，但仍按被报告主机校验 SNI 与证书 |
-| `inspect_proxy_environment` | 读取环境及平台实际生效的代理并隐藏凭据 |
+| `resolve_dns` | 查一个主机名指向哪些 IP。默认问你自己系统里的 DNS；加上 `resolver="doh:cloudflare"`（或 `doh:google`、`doh:quad9`）还会问一个公共 DNS-over-HTTPS 服务器，并把两边答案并排显示 |
+| `test_tcp` | 对一个主机和端口发起一次 TCP 连接。加上 `address=<IP>` 就连到指定 IP，而不是 DNS 返回的那个 |
+| `test_http` | 发送 HEAD，拦截跳转到其他主机；服务器不接受 HEAD 时改用不读取正文的 Range GET |
+| `inspect_tls` | 检查 TLS 连接并读证书。加上 `address=<IP>` 连到指定 IP，但证书仍按你报告的主机名校验 |
+| `inspect_proxy_environment` | 读取代理设置，密码一律抹掉 |
 | `inspect_hosts_file` | 检查一个报告主机是否被本地 hosts 文件覆盖 |
-| `system_network_context` | 报告操作系统信息和脱敏后的代理配置 |
+| `system_network_context` | 报告操作系统与代理设置，密码一律抹掉 |
 
-项目不提供任意命令执行或端口扫描工具。`address` 只把连接换到同一已报告主机的另一个 IP，
-且必须是 IP 字面量；被报告主机仍必须出现在原始报告中，因此对照不会扩大目标集合。
+项目不提供执行任意命令或扫描端口的工具。
+
+### 把自己的 DNS 和公网答案对比一下
+
+有些代理（Clash、Mihomo 之类，开启 TUN 时）会用 `198.18.x.x` 这种编造地址回答 DNS。之后 TCP
+连接几毫秒就"成功"了，但这次握手是你机器上的代理自己接的，真正的服务器根本没被访问过。所以
+这种"TCP ok"说明不了目标网站到底通不通。
+
+有两个开关可以解决这件事，而且都不改动任何配置：
+
+- `resolver="doh:cloudflare"`：通过 HTTPS 问一个公共解析器，把它的答案和你系统里的答案并排返回。
+  用 HTTPS 是故意的——TUN 模式下访问 `8.8.8.8` 这种公共 DNS 的普通 UDP/53 请求通常会被劫持，
+  而 DNS-over-HTTPS 不会。
+- `address=<IP>`：让 `test_tcp` 或 `inspect_tls` 连到某个指定 IP。配合上面那次查询，可以直接连
+  公网 IP，而不是那个假地址。
+
+如果两边答案不一致，说明你本地的 DNS 改写了目标地址——照实这么说，而不是去怪网站。
+
+`address` 里的 IP 不是新目标：主机名仍然必须是你报告过的那一个，`address` 也只能填 IP，不能填
+主机名。所以做对照不会变成去扫描别的机器。
 
 ## Agent 行为
 
@@ -132,10 +150,9 @@ DNS · TCP · HTTP · TLS · 代理环境 · hosts 文件 · 系统信息
 - **首轮强制取证。** 第一轮模型请求以 `tool_choice="required"` 发送，模型必须先调用一个诊断工具才能作答。如果后端拒绝 `required`，会自动退回 `auto` 重试；如果后端接受却无视要求，其无证据回答会被丢弃并再次要求取证。
 - **目标作用域强制执行。** 运行时从原始报告中提取主机、IP 和 URL；任何超出白名单的网络调用都会收到 `target_out_of_scope`，不会真正执行。
 - **工作量有界。** 每轮最多接受四次调用，整次诊断默认最多实际执行 12 次工具调用（最高可配置为 24）。
-- **不加新目标的受控对照。** `resolve_dns(resolver="doh:cloudflare")` 会在本地解析结果旁边
-  给出固定公共 DNS-over-HTTPS 解析器的答案；`test_tcp` 与 `inspect_tls` 可传入该主机的显式 IP。
-  作用域检查仍然要求主机出现在原始报告中，并拒绝 `address` 传主机名，因此对照不会变成对未报告
-  主机的探测。
+- **不加新目标的受控对照。** `resolve_dns(resolver="doh:cloudflare")` 会把公共解析器的答案放在
+  你本地答案旁边；`test_tcp` 与 `inspect_tls` 可以传入该主机的指定 IP。作用域检查仍然要求主机
+  出现在原始报告里，并拒绝 `address` 填主机名，所以对照不会漂移成对未报告主机的探测。
 - **不收敛时优雅返回。** 如果模型连续三轮调用同一个工具仍未结束，或者用尽了轮次上限，运行时会停止并返回**结构化的部分诊断**——仍然输出四个段落，但 Diagnosis 段会注明模型未收敛，Evidence 段列出已收集的全部结果。因此 CLI 会以退出码 0 返回已收集的证据，而不是直接报错。硬性的 `StepLimitError`（退出码 1）仅保留给"未收集到任何证据"的罕见情况。
 
 ## 快速开始

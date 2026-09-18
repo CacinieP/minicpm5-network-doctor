@@ -4,53 +4,51 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.5.0 — 2026-09-17
 
+Closes the remaining review items of issue #1: what a successful TCP connection to a fake-IP
+address does and does not prove, and a way to actually run the controlled comparison the prompt
+already asks for.
+
 ### Added
 
-- `resolve_dns` accepts `resolver="doh:cloudflare"`, `"doh:google"`, or `"doh:quad9"`. The result
-  carries the public DNS-over-HTTPS answer for the host **next to** the system-resolver answer plus
-  a deterministic comparison observation, so a local DNS rewrite is visible in a single call. Plain
-  UDP/53 to a public resolver is typically hijacked in TUN mode; DoH is not, which is what makes it
-  a usable second path. Answers about another owner name, or unparsable data, are dropped instead of
-  reported.
-- `test_tcp` and `inspect_tls` accept an `address` argument: an IP literal for the reported host, so
-  a connection or handshake can be attempted against one explicit resolution path. `inspect_tls`
-  still uses the reported host for SNI and certificate validation. `scope.py` accepts `address`
-  only when the host itself was reported and rejects a hostname there, so a controlled comparison
-  cannot widen the target set.
+- `resolve_dns` now accepts `resolver="doh:cloudflare"`, `"doh:google"`, or `"doh:quad9"`. In one
+  call you get the public resolver's answer **next to** your system's answer for the same hostname,
+  plus a plain sentence saying whether the two agree. If your local DNS is rewriting the
+  destination, you can see it here. The resolver is queried over HTTPS because plain DNS to a
+  public server is usually intercepted in TUN mode.
+- `test_tcp` and `inspect_tls` now accept `address=<IP>`, so a connection or TLS handshake can be
+  made to one specific IP. `inspect_tls` still checks the certificate against the hostname you
+  reported, so it verifies the host, not just the address.
+- An IP in `address` is not treated as a new target: the hostname still has to be the one you
+  reported, and a hostname in `address` is refused. A comparison cannot become a scan of another
+  host.
 
 ### Fixed
 
-- Fake-IP TCP semantics. `resolve_dns` and `test_tcp` now state that TCP success to a fake-IP
-  address only proves that the local proxy accepted the connection and carries no information about
-  the real upstream, and the system prompt no longer describes a successful TCP connection as
-  evidence that "the mapped path is reachable". `test_tcp` reports `peer_classification` and
-  attaches that note deterministically when the peer is a fake-IP address, instead of leaving the
-  caveat to the prompt alone.
-- The `cg nat` observation no longer claims the address "is typically injected"; it now says it is
-  typically assigned by an overlay such as Tailscale, or used as a proxy address pool. The existing
-  fake-IP wording test gained a sibling that locks the CG-NAT branch.
+- `test_tcp` reports what it actually connected to (`peer_address`, `peer_classification`) and, when
+  that peer is a fake-IP address, attaches the caveat itself: the local proxy accepted the
+  connection, which says nothing about the real server. Previously this only lived in the prompt, so
+  it could be missed.
+- The prompt no longer calls a successful TCP connection evidence that "the mapped path is
+  reachable", which was easy to read as "the target is reachable".
+- The note about `100.64.0.0/10` addresses no longer says the address "is typically injected"; it now
+  says it is typically assigned by an overlay such as Tailscale, or used as a proxy's address pool.
 
 ### Documentation
 
-- New `docs/evidence/README.md` with the required-field checklist for evidence records (version and
-  source state, environment, model residency, complete invocation, backend parameters, per-check
-  outcome, waited time before any interruption, explicit non-claims).
-- `docs/evidence/2026-09-02-ollama-f16-smoke.md` gained an addendum naming the fields that were not
-  captured and therefore cannot be reconstructed, so its *Inconclusive* row is no longer citable as
-  evidence about model behaviour.
+- New `docs/evidence/README.md`: what an evidence record must contain before it counts as evidence
+  (version and commit, environment, whether the model was already loaded, the exact command line,
+  and how long you waited before interrupting anything).
+- The 2026-09-02 Ollama record now says which of those fields were never captured, so its
+  "inconclusive" result is no longer quoted as if it could be reproduced.
 
 ### Verified
 
-- Locally on Python 3.14.7: 182 tests pass (was 105 at v0.4.0), 89.23% branch coverage, `ruff check`
-  and `ruff format --check` clean, `scripts/verify_metadata.py` passes for version 0.5.0.
-- On a real Clash/Mihomo TUN fake-ip stack (`docs/evidence/2026-09-17-doh-comparison.md`): the
-  system resolver returned `198.18.0.6` for `example.com` while `resolver="doh:cloudflare"` returned
-  public Cloudflare addresses in the same call; `test_tcp` accepted the fake-IP peer in 6.5 ms with
-  the caveat attached, `test_tcp(address=...)` reached the DoH-reported address in 8.1 ms, and
-  `inspect_tls(address=...)` completed a TLSv1.3 handshake whose certificate is issued to
-  `example.com`. One run per check, so no stability or accuracy claim.
-- CI on the release commit is the authoritative evidence per `docs/publishing.md` and had not run
-  yet when this entry was written.
+- On a real Clash/Mihomo TUN setup (`docs/evidence/2026-09-17-doh-comparison.md`): `example.com`
+  resolved to `198.18.0.6` locally while the same call through Cloudflare returned real Cloudflare
+  addresses; `test_tcp` accepted the fake IP in 6.5 ms with the caveat attached; connecting to the
+  real IP took 8.1 ms; and the TLS check against that IP returned a valid certificate for
+  `example.com`. One run per check, so nothing here is a stability or accuracy claim.
+- Tests: 182 passed, 89.23% branch coverage, lint and format clean.
 
 ## 0.4.0 — 2026-09-17
 

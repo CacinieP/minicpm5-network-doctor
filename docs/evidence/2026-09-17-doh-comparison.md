@@ -7,6 +7,11 @@ stack where the two resolution paths genuinely disagree.
 
 Written against the required-field checklist in [`README.md`](README.md).
 
+**In plain words:** on this machine DNS answers with a fake address inside the proxy, so a normal TCP
+check "succeeds" without ever reaching the website. The new switches let one call ask a public
+resolver over HTTPS and show both answers, and let a connection be made straight to the real IP. Both
+answers and both connection timings are below.
+
 ## Environment
 
 - Timestamp: `2026-09-17T15:48:22Z` (checks run within the same minute)
@@ -29,7 +34,8 @@ Written against the required-field checklist in [`README.md`](README.md).
 
 ## What this does not establish
 
-- Nothing about model behaviour: no model turn ran, so no tool-selection or convergence claim.
+- Nothing about model behaviour: no model server was running, so there is no tool-selection or
+  convergence claim here.
 - No repetition and no scenario suite: one run per check, so no stability or accuracy claim.
 - The disagreement shows the local DNS answer is not the public answer; it does **not** show that
   the proxy caused any particular application failure.
