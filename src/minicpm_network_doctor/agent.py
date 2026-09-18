@@ -319,11 +319,7 @@ class NetworkDoctor:
             # After enough evidence-gathering turns, nudge the model to synthesise
             # instead of calling yet another tool. Without this, small models loop
             # on tool_choice="auto" until max_steps is exhausted.
-            if (
-                has_evidence
-                and turn > _SYNTHESIS_NUDGE_AFTER
-                and not synthesis_nudge_sent
-            ):
+            if has_evidence and turn > _SYNTHESIS_NUDGE_AFTER and not synthesis_nudge_sent:
                 messages.append(
                     {
                         "role": "user",
@@ -345,8 +341,7 @@ class NetworkDoctor:
                 if _is_timeout_error(exc) and _has_evidence(events):
                     warnings.append("model_request_timed_out")
                     non_convergence_reason = (
-                        "the model request timed out; "
-                        "raise --timeout or reduce --max-tokens"
+                        "the model request timed out; raise --timeout or reduce --max-tokens"
                     )
                     break
                 raise NetworkDoctorError(f"MiniCPM5 request failed: {exc}") from exc
