@@ -16,6 +16,15 @@ All notable changes are documented here. The project follows semantic versioning
   in prior turns. Timeout errors are now caught when evidence exists, returning a partial
   diagnosis with `model_request_timed_out` warning and exit code 0.
 
+### Evidence
+
+- **Closed #4: Real-model tool-call evidence.** `docs/evidence/2026-09-17-llama-cpp-2b.md` now
+  satisfies the acceptance criteria: non-thinking mode shows 4 tool calls with complete convergence;
+  thinking mode shows 4 tool calls with subsequent truncation documented as a token-budget limitation
+  (not a missing-tool-call issue). The record follows `docs/evidence/README.md` checklist with
+  environment, exact commands, backend settings, and per-turn outcomes. `--max-tokens` is exposed
+  as the user-controlled knob for thinking-mode budget.
+
 ## 0.5.0 — 2026-09-17
 
 Closes the remaining review items of issue #1: what a successful TCP connection to a fake-IP
